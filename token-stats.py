@@ -115,7 +115,17 @@ def detect_context(model_name: str) -> int:
 
 def parse_date(s: str) -> tuple:
     """Parse 'YYYY-MM-DD' → (start_ts, end_ts)"""
-    dt = datetime.strptime(s.strip(), "%Y-%m-%d")
+    try:
+        dt = datetime.strptime(s.strip(), "%Y-%m-%d")
+    except ValueError:
+        print(f"❌ 日期格式错误或日期不存在: {s}")
+        print("   请使用 YYYY-MM-DD 格式输入有效日期（例如 2025-06-15）")
+        sys.exit(1)
+    now = datetime.now()
+    # 未来日期 → 自动截断到当前时间
+    if dt > now:
+        dt = now
+        print(f"⚠️ 日期 {s} 在未来，已自动截断到当前时间")
     start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     end = dt.replace(hour=23, minute=59, second=59, microsecond=0)
     return start.timestamp(), end.timestamp()
@@ -283,10 +293,8 @@ class BaseAgent(ABC):
                 print(line)
         print()
 
-        # ── 累计变化跟踪 ──
-        cum_deltas = {}
-
-        # ── 监控循环 ──
+        # ── 监控循环：每 tick 打印完整当前状态 ──
+        prev_models = dict(bl_models)
         while not stop_event.is_set():
             tick_start = time.monotonic()
             if not _interruptible_sleep(interval):
@@ -317,63 +325,92 @@ class BaseAgent(ABC):
                     "cache": data.stats.get("cache_read", 0),
                 }
 
+            # 计算增量 & 更新累计
+            ts = datetime.now().strftime("%H:%M:%S")
             changed_models = []
             total_delta_tok = 0
             total_delta_calls = 0
             for mn, mv in now_models.items():
-                bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
-                d_in = mv["input"] - bl["input"]
-                d_out = mv["output"] - bl["output"]
-                d_calls = mv["calls"] - bl["calls"]
-                d_cache = mv["cache"] - bl["cache"]
+                prev = prev_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+                d_in = mv["input"] - prev["input"]
+                d_out = mv["output"] - prev["output"]
+                d_calls = mv["calls"] - prev["calls"]
+                d_cache = mv["cache"] - prev["cache"]
                 d_tok = d_in + d_out
-                if d_tok > 0 or d_calls > 0 or d_cache > 0:
+                if d_tok != 0 or d_calls != 0 or d_cache != 0:
                     changed_models.append((mn, d_in, d_out, d_tok, d_calls, d_cache))
                     total_delta_tok += d_tok
                     total_delta_calls += d_calls
-                    if mn not in cum_deltas:
-                        cum_deltas[mn] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
-                    cum_deltas[mn]["input"] += d_in
-                    cum_deltas[mn]["output"] += d_out
-                    cum_deltas[mn]["calls"] += d_calls
-                    cum_deltas[mn]["cache"] += d_cache
-                elif d_tok < 0 or d_calls < 0:
+                # 记录新出现的模型到 bl_models
+                if mn not in bl_models:
                     bl_models[mn] = mv
 
-            # 输出增量
-            if changed_models:
-                ts = datetime.now().strftime("%H:%M:%S")
-                print(f"── [{ts}] +{fmt_num(total_delta_tok)} tokens ({total_delta_calls} calls) ──")
-                for mn, d_in, d_out, d_tok, d_calls, d_cache in changed_models:
-                    parts = []
-                    parts.append(f"+{fmt_num(d_tok)} tokens")
-                    if d_in:
-                        parts.append(f"+{fmt_num(d_in)} 输入")
-                    if d_out:
-                        parts.append(f"+{fmt_num(d_out)} 输出")
-                    if d_cache:
-                        parts.append(f"+{fmt_num(d_cache)} 缓存")
-                    print(f"  {mn} | {' | '.join(parts)} | {d_calls} calls")
-                    bl_models[mn] = mv
+            # 每 tick 打印当前完整状态
+            print(f"── [{ts}] ──")
+            for mn, mv in now_models.items():
+                cw = detect_context(mn)
+                line = format_model_line(mn, mv["input"], mv["output"],
+                                         mv.get("cache", 0), mv.get("calls", 0),
+                                         context_window=cw)
+                if line:
+                    print(line)
+                # 如果有增量，追加一行显示变化
+                for cm, d_in, d_out, d_tok, d_calls, d_cache in changed_models:
+                    if cm == mn:
+                        parts = []
+                        if d_tok:
+                            prefix = "+" if d_tok > 0 else ""
+                            parts.append(f"{prefix}{fmt_num(d_tok)} tokens")
+                        if d_in:
+                            prefix = "+" if d_in > 0 else ""
+                            parts.append(f"{prefix}{fmt_num(d_in)} 输入")
+                        if d_out:
+                            prefix = "+" if d_out > 0 else ""
+                            parts.append(f"{prefix}{fmt_num(d_out)} 输出")
+                        if d_cache:
+                            prefix = "+" if d_cache > 0 else ""
+                            parts.append(f"{prefix}{fmt_num(d_cache)} 缓存")
+                        if d_calls:
+                            prefix = "+" if d_calls > 0 else ""
+                            parts.append(f"{prefix}{d_calls} 调用")
+                        if parts:
+                            print(f"    Δ {' · '.join(parts)}")
+
+            # 更新 prev_models
+            prev_models = dict(now_models)
 
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
             if elapsed < interval and not stop_event.is_set():
                 _interruptible_sleep(interval - elapsed)
 
-        # ── 停止汇总 ──
-        print("\n" + "━" * 60)
+        # ── 停止汇总：从末态减初态计算总变化 ──
+        sep_w = 60
+        print()
+        print("━" * sep_w)
         print("  📊 本次监控汇总")
-        print("━" * 60)
-        if cum_deltas:
-            max_model_len = max(len(mn) for mn in cum_deltas)
+        print("━" * sep_w)
+
+        # 计算累计变化：prev_models（最新） - bl_models（初始基线）
+        final_deltas = {}
+        for mn, mv in prev_models.items():
+            bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+            d_in = mv["input"] - bl["input"]
+            d_out = mv["output"] - bl["output"]
+            d_calls = mv["calls"] - bl["calls"]
+            d_cache = mv["cache"] - bl["cache"]
+            if d_in != 0 or d_out != 0 or d_calls != 0 or d_cache != 0:
+                final_deltas[mn] = {"input": d_in, "output": d_out, "calls": d_calls, "cache": d_cache}
+
+        if final_deltas:
+            max_model_len = max(len(mn) for mn in final_deltas)
             model_col = max(max_model_len, 8)
             hdr = f"  {'模型':<{model_col}} {'增量 tokens':>12} {'调用':>6} {'输入':>10} {'输出':>10} {'缓存':>10} {'占用':>8}"
             print(hdr)
             print("  " + "─" * (model_col + 12 + 6 + 10 + 10 + 10 + 8 + 1))
             total_tok = 0
             total_calls = 0
-            for mn, cd in sorted(cum_deltas.items()):
+            for mn, cd in sorted(final_deltas.items()):
                 d_tok = cd["input"] + cd["output"]
                 pct = ""
                 cw = detect_context(mn)
@@ -384,7 +421,7 @@ class BaseAgent(ABC):
                       f"{fmt_num(cd['cache']):>10} {pct:>8}")
                 total_tok += d_tok
                 total_calls += cd["calls"]
-            print("━" * 60)
+            print("━" * sep_w)
             print(f"  总计: {fmt_num(total_tok)} tokens, {total_calls} 次调用")
         else:
             print("  监控期间没有检测到变化")
@@ -412,7 +449,7 @@ class HermesAgent(BaseAgent):
         return os.path.exists(HERMES_DB)
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        conn = sqlite3.connect(HERMES_DB)
+        conn = sqlite3.connect(HERMES_DB, timeout=5)
         conn.row_factory = sqlite3.Row
 
         if from_ts is not None or to_ts is not None:
@@ -1064,10 +1101,18 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         print("两个时间段均无数据")
         return
 
-    print(f"\n📊 对比: \"{a_label}\" vs \"{b_label}\"  [{agent.display_name()}]")
-    print("═" * 70)
-    print(f"  {'模型':<28} | {'A':>12} | {'B':>12} | {'变化':>12}")
-    print("─" * 70)
+    print()
+    print(f'📊 对比: "{a_label}" vs "{b_label}"  [{agent.display_name()}]')
+    # 列宽根据标签长度自适应
+    label_w = max(len(b_label), 12) if len(b_label) > len(a_label) else max(len(a_label), 12)
+    col_model = 28      # 模型列宽（不含前导空格）
+    col_delta = 12      # 变化列宽
+    sep = 3             # " | " 分隔符宽度
+    leading = 2         # "  " 前导空格
+    total_w = leading + col_model + sep + label_w + sep + label_w + sep + col_delta
+    print("═" * total_w)
+    print(f"  {'模型':<{col_model}} | {a_label:>{label_w}} | {b_label:>{label_w}} | {'变化':>{col_delta}}")
+    print("─" * total_w)
 
     total_a, total_b = 0, 0
     model_count = 0
@@ -1083,7 +1128,7 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         total_b += tb
         delta = tb - ta
         delta_str = f"+{fmt_num(delta)}" if delta > 0 else fmt_num(delta) if delta < 0 else "0"
-        print(f"  {mn:<28} | {fmt_num(ta):>12} | {fmt_num(tb):>12} | {delta_str:>12}")
+        print(f"  {mn:<28} | {fmt_num(ta):>{label_w}} | {fmt_num(tb):>{label_w}} | {delta_str:>12}")
         model_count += 1
 
     if model_count == 0:
@@ -1091,10 +1136,10 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         print()
         return
 
-    print("─" * 70)
+    print("─" * total_w)
     total_delta = total_b - total_a
     total_delta_str = f"+{fmt_num(total_delta)}" if total_delta > 0 else fmt_num(total_delta) if total_delta < 0 else "0"
-    print(f"  {'总计':<28} | {fmt_num(total_a):>12} | {fmt_num(total_b):>12} | {total_delta_str:>12}")
+    print(f"  {'总计':<{col_model}} | {fmt_num(total_a):>{label_w}} | {fmt_num(total_b):>{label_w}} | {total_delta_str:>{col_delta}}")
     print()
 
 
@@ -1145,28 +1190,43 @@ def main():
         description="token-stats — 选个 Agent 看它的 token 消耗",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
-示例:
-  token-stats                    交互式选择 Agent → 查看统计
-  token-stats -b hermes          直接查看 Hermes
-  token-stats --watch            交互式选择 Agent → 实时监控
-  token-stats --all              查看本机所有 Agent
-  token-stats -b hermes --detail 查看 Hermes 详细统计
+命令大全:
+  基础:
+    token-stats                       交互式菜单选择 Agent → 查看统计
+    token-stats -b <name>             直接指定 Agent: hermes/claude-code/codex/openclaw
+    token-stats --version             显示版本号
+    token-stats -b <name> --detail    详细模式（同默认）
+    token-stats -b <name> --now       当前快照（同默认）
 
-  时间段:
-  token-stats -b hermes --today
-  token-stats -b hermes --from 2025-01-01 --to 2025-01-31
-
-  导出:
-  token-stats -b hermes --export
+  快速时间段:
+    token-stats -b <name> --today     今日统计
+    token-stats -b <name> --yesterday 昨日统计
+    token-stats -b <name> --week      本周统计（周一起）
+    token-stats -b <name> --last-7d   最近 7 天
+    token-stats -b <name> --from 2025-01-01 --to 2025-01-31  自定义时间段
 
   对比:
-  token-stats -b hermes --compare --a today --b yesterday
-  token-stats -b hermes --compare --a this-week --b last-week
-  token-stats -b hermes --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
+    token-stats -b <name> --compare --a today --b yesterday
+        快捷标签对比
+    token-stats -b <name> --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
+        自定义时间段对比
+    标签支持: today / yesterday / this-week / last-week / YYYY-MM-DD / YYYY-MM-DD~YYYY-MM-DD
 
-安装:
-  clawhub install agent-usage-stats
-  token-stats setup              创建 ~/.local/bin/token-stats
+  导出:
+    token-stats -b <name> --export    导出当前统计（交互式选目录和格式）
+    token-stats -b <name> --today --export  导出今日统计
+
+  实时监控:
+    token-stats -b <name> --watch     实时监控，每 5 秒刷新 (Ctrl+C 停止)
+    token-stats -b <name> --watch 10  自定义间隔秒数
+
+  多 Agent:
+    token-stats --all                 查看本机所有 Agent 统计
+    token-stats --list-backends       列出已安装的 Agent
+
+  安装:
+    clawhub install agent-usage-stats  从 ClawHub 安装
+    token-stats --setup                创建 ~/.local/bin/token-stats 全局命令
         """,
     )
     parser.add_argument("--version", action="store_true", help="显示版本号")
@@ -1174,7 +1234,7 @@ def main():
     parser.add_argument("-b", "--backend", help="直接指定 Agent: hermes/claude-code/codex/openclaw")
     parser.add_argument("--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
                         help="实时监控模式（默认每 5 秒轮询）")
-    parser.add_argument("setup", nargs="?", const=True, help="创建 ~/.local/bin/token-stats")
+    parser.add_argument("setup_pos", nargs="?", const=True, help=argparse.SUPPRESS)
 
     # 时间段
     parser.add_argument("--today", action="store_true", help="今日统计")
@@ -1193,13 +1253,33 @@ def main():
     parser.add_argument("--detail", action="store_true", help="详细信息模式")
     parser.add_argument("--now", action="store_true", help="当前快照（同默认）")
     parser.add_argument("--all", action="store_true", help="查看本机所有 Agent 统计")
+    parser.add_argument("--setup", action="store_true", help="创建 ~/.local/bin/token-stats")
 
     args = parser.parse_args()
+
+    # 兼容旧用法：token-stats setup → 当作 --setup
+    if args.setup_pos is True or args.setup_pos == "setup":
+        args.setup = True
 
     # ── version ──
     if args.version:
         print(f"token-stats v{VERSION}")
         return
+
+    # ── 先校验 backend 名称，避免 setup 被误触发 ──
+    if args.backend:
+        backend_lower = args.backend.lower().strip()
+        valid_names = [cls.name() for cls in ALL_AGENTS]
+        if backend_lower not in valid_names:
+            # 尝试模糊匹配
+            close_matches = [n for n in valid_names if backend_lower in n or n.startswith(backend_lower)]
+            if close_matches:
+                print(f"❌ 不支持的 Agent: {args.backend}")
+                print(f"   你是否想输入: {', '.join(close_matches)}")
+            else:
+                print(f"❌ 不支持的 Agent: {args.backend}")
+                print(f"   可选: {', '.join(valid_names)}")
+            return
 
     # ── setup ──
     if args.setup:

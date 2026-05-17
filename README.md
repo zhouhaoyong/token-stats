@@ -192,7 +192,20 @@ Compare output:
 Interactive directory + format selection:
 
 ```bash
+# Export latest session
 token-stats -b hermes --export
+
+# Export today's data
+token-stats -b hermes --today --export
+
+# Export yesterday's data
+token-stats -b hermes --yesterday --export
+
+# Export last 7 days
+token-stats -b hermes --last-7d --export
+
+# Export custom date range
+token-stats -b hermes --from 2025-01-01 --to 2025-01-31 --export
 ```
 
 Flow: shows stats → prompts for directory → prompts for JSON or CSV.
@@ -221,6 +234,81 @@ token-stats --list-backends
 ```
 
 ✅ = installed, ❌ = not found. Missing agents won't appear in the menu.
+
+---
+
+## Command Reference
+
+All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, `codex`, `openclaw`.
+
+### Basics
+
+| Command | Description |
+|---------|-------------|
+| `token-stats` | Interactive menu → pick an agent → view stats |
+| `token-stats -b <name>` | Skip the menu, pick an agent directly |
+| `token-stats --version` | Show version number |
+| `token-stats -b <name> --detail` | Detailed mode (same as default) |
+| `token-stats -b <name> --now` | Current snapshot (same as default) |
+
+### Time Ranges
+
+| Command | Description |
+|---------|-------------|
+| `token-stats -b <name> --today` | Today's stats (00:00:00 ~ now) |
+| `token-stats -b <name> --yesterday` | Yesterday's stats (all day) |
+| `token-stats -b <name> --week` | This week (Monday till now) |
+| `token-stats -b <name> --last-7d` | Last 7 days |
+| `token-stats -b <name> --from 2025-01-01 --to 2025-01-31` | Custom range (start 00:00 ~ end 23:59) |
+
+### Comparison
+
+| Command | Description |
+|---------|-------------|
+| `token-stats -b <name> --compare --a today --b yesterday` | Quick label comparison |
+| `token-stats -b <name> --compare --a this-week --b last-week` | This week vs last week |
+| `token-stats -b <name> --compare --a 2025-01-01 --b 2025-01-15` | Two single-day comparison |
+| `token-stats -b <name> --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14` | Custom date range comparison |
+
+**`--a` / `--b` supported formats:**
+- `today`, `yesterday`
+- `this-week`, `last-week`
+- `YYYY-MM-DD` — single day
+- `YYYY-MM-DD~YYYY-MM-DD` — date range
+
+### Export
+
+| Command | Description |
+|---------|-------------|
+| `token-stats -b <name> --export` | Export current stats (interactive directory + format) |
+| `token-stats -b <name> --today --export` | Export today's stats |
+| `token-stats -b <name> --yesterday --export` | Export yesterday's stats |
+| `token-stats -b <name> --last-7d --export` | Export last 7 days |
+| `token-stats -b <name> --from X --to Y --export` | Export custom date range |
+
+### Live Monitoring
+
+| Command | Description |
+|---------|-------------|
+| `token-stats --watch` | Interactive → monitor, polls every 5s (Ctrl+C to stop) |
+| `token-stats -b <name> --watch` | Direct agent, default 5s interval |
+| `token-stats -b <name> --watch 10` | Custom 10s interval |
+
+### Multi-Agent
+
+| Command | Description |
+|---------|-------------|
+| `token-stats --all` | Show stats for ALL installed agents |
+| `token-stats --list-backends` | List installed agents (check mark or cross) |
+
+### Setup & Maintenance
+
+| Command | Description |
+|---------|-------------|
+| `clawhub install agent-usage-stats` | Install from ClawHub |
+| `token-stats --setup` | Create global command at `~/.local/bin/token-stats` |
+
+> 💡 All commands above are also available via `token-stats --help`.
 
 ---
 

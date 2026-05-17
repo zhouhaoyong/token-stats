@@ -128,6 +128,12 @@ token-stats -b hermes --now
 token-stats -b hermes --detail
 ```
 
+所有命令都支持切换 Agent 名称，例如：
+- `-b hermes` → Hermes
+- `-b claude-code` → Claude Code
+- `-b codex` → CodeX
+- `-b openclaw` → OpenClaw
+
 输出示例（每个模型一行，仅显示有数据的模型）：
 ```
 📊 Hermes
@@ -143,8 +149,11 @@ token-stats -b hermes --detail
 查看某段时间内的总消耗（不显示上下文占比，显示会话数）：
 
 ```bash
-# 今天
+# 今天（各 Agent 通用）
 token-stats -b hermes --today
+token-stats -b claude-code --today
+token-stats -b codex --today
+token-stats -b openclaw --today
 
 # 昨天
 token-stats -b hermes --yesterday
@@ -156,7 +165,8 @@ token-stats -b hermes --week
 token-stats -b hermes --last-7d
 
 # 自定义日期范围（从当天 00:00:00 到当天 23:59:59）
-token-stats -b hermes --from 2025-01-01 --to 2025-01-31
+token-stats -b hermes --from 2026-01-01 --to 2026-05-18
+token-stats -b claude-code --from 2026-01-01 --to 2026-05-18
 ```
 
 时间段输出示例（无上下文占比，显示会话数）：
@@ -173,10 +183,11 @@ token-stats -b hermes --compare --a today --b yesterday
 token-stats -b hermes --compare --a this-week --b last-week
 
 # 单天对比
-token-stats -b hermes --compare --a 2025-01-01 --b 2025-01-15
+token-stats -b hermes --compare --a 2026-01-01 --b 2026-05-18
+token-stats -b claude-code --compare --a 2026-01-01 --b 2026-05-18
 
 # 时间段对比（YYYY-MM-DD~YYYY-MM-DD）
-token-stats -b hermes --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
+token-stats -b hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-05-18
 ```
 
 对比输出示例：
@@ -195,7 +206,23 @@ token-stats -b hermes --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01
 交互式选择目录和格式：
 
 ```bash
+# 导出当前最新会话
 token-stats -b hermes --export
+token-stats -b claude-code --export
+token-stats -b codex --export
+
+# 导出今天的数据
+token-stats -b hermes --today --export
+
+# 导出昨天的数据
+token-stats -b hermes --yesterday --export
+
+# 导出过去 7 天
+token-stats -b hermes --last-7d --export
+
+# 导出指定时间段
+token-stats -b hermes --from 2026-01-01 --to 2026-05-18 --export
+token-stats -b claude-code --from 2026-01-01 --to 2026-05-18 --export
 ```
 
 流程：先显示统计 → 请输入导出目录路径 → 选择 JSON 还是 CSV。
@@ -224,6 +251,83 @@ token-stats --list-backends
 ```
 
 ✅ 表示已安装，❌ 表示没装。没装的 Agent 不会出现在菜单里。
+
+---
+
+## 命令大全
+
+所有命令都支持将 `-b hermes` 中的 `hermes` 替换为：`claude-code`、`codex`、`openclaw`。
+
+### 基础
+
+| 命令 | 说明 |
+|------|------|
+| `token-stats` | 交互式菜单选择 Agent → 查看统计 |
+| `token-stats -b <name>` | 直接指定 Agent，跳过菜单 |
+| `token-stats --version` | 显示版本号 |
+| `token-stats -b <name> --detail` | 详细模式（同默认） |
+| `token-stats -b <name> --now` | 当前快照（同默认） |
+
+### 快速时间段
+
+| 命令 | 说明 |
+|------|------|
+| `token-stats -b <name> --today` | 今日统计（当天 00:00:00 ~ 现在） |
+| `token-stats -b <name> --yesterday` | 昨日统计（昨天全天） |
+| `token-stats -b <name> --week` | 本周统计（周一开始至今） |
+| `token-stats -b <name> --last-7d` | 最近 7 天 |
+| `token-stats -b <name> --from 2026-01-01 --to 2026-05-18` | 自定义时间段（起始日 00:00 到结束日 23:59） |
+
+### 对比
+
+| 命令 | 说明 |
+|------|------|
+| `token-stats -b <name> --compare --a today --b yesterday` | 快捷标签对比 |
+| `token-stats -b <name> --compare --a this-week --b last-week` | 本周 vs 上周 |
+| `token-stats -b <name> --compare --a 2026-01-01 --b 2026-05-18` | 两个单天对比 |
+| `token-stats -b <name> --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-05-18` | 自定义时间段对比 |
+
+**`--a` / `--b` 支持的格式：**
+- `today` — 今天
+- `yesterday` — 昨天
+- `this-week` — 本周（周一起）
+- `last-week` — 上周
+- `2026-01-01` — 单天
+- `2026-01-01~2026-01-07` — 时间段（起始~结束）
+
+### 导出
+
+| 命令 | 说明 |
+|------|------|
+| `token-stats -b <name> --export` | 导出当前统计（交互式选目录和格式） |
+| `token-stats -b <name> --today --export` | 导出今日统计 |
+| `token-stats -b <name> --yesterday --export` | 导出昨日统计 |
+| `token-stats -b <name> --last-7d --export` | 导出近 7 天统计 |
+| `token-stats -b <name> --from 2026-01-01 --to 2026-05-18 --export` | 导出指定时间段统计 |
+
+### 实时监控
+
+| 命令 | 说明 |
+|------|------|
+| `token-stats --watch` | 交互式选 Agent → 每 5 秒刷新（Ctrl+C 停止） |
+| `token-stats -b <name> --watch` | 直接指定 Agent，默认 5 秒 |
+| `token-stats -b <name> --watch 10` | 自定义间隔 10 秒 |
+
+### 多 Agent
+
+| 命令 | 说明 |
+|------|------|
+| `token-stats --all` | 查看本机所有 Agent 统计 |
+| `token-stats --list-backends` | 列出已安装的 Agent |
+
+### 安装与维护
+
+| 命令 | 说明 |
+|------|------|
+| `clawhub install agent-usage-stats` | 从 ClawHub 安装 |
+| `token-stats --setup` | 创建 `~/.local/bin/token-stats` 全局命令 |
+
+> 💡 以上所有命令也可以通过 `token-stats --help` 在线查看。
 
 ---
 
@@ -386,7 +490,7 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 
 1. **Agent 虽然装了但还没使用过** → 先去用一下再回来查
 2. **数据文件路径不对** → 运行 `token-stats --list-backends` 确认是否被检测到
-3. **时间段内没有数据** → 如果是 `--today` 或 `--from 2025-01-01`，确认该时间段内确实有会话
+3. **时间段内没有数据** → 如果是 `--today` 或 `--from 2026-01-01`，确认该时间段内确实有会话
 
 #### ❓ 对比结果显示 `unknown` 模型
 
