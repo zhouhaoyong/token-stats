@@ -27,32 +27,189 @@
 - **自动检测**：无需配置，直接运行
 - **表格输出**：按模型分块展示，带上下文窗口占比警告
 
-## 🚀 快速开始
+---
+
+## 🚀 按操作系统安装
+
+请根据你的操作系统选择下方对应章节，包含各 Agent 的详细用法。
+
+---
+
+### 🍎 macOS
+
+**默认 shell：** zsh（macOS Catalina 起）
+
+#### 第 1 步 — 安装 token-stats
 
 ```bash
 # 方式一：ClawHub 安装（OpenClaw 用户推荐）
 clawhub install agent-usage-stats
-# 安装后脚本在 ~/.hermes/skills/agent-usage-stats/token-stats.py
-# 建议设置别名方便使用：
+
+# 方式二：直接下载（零依赖，通用）
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
+```
+
+#### 第 2 步 — 配置命令别名
+
+```bash
+# 添加到 ~/.zshrc
 echo 'alias token-stats="python3 ~/.hermes/skills/agent-usage-stats/token-stats.py"' >> ~/.zshrc
 source ~/.zshrc
 
-# 方式二：直接下载（零依赖）
-curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
-chmod +x token-stats.py
+# (如果直接下载的脚本，请使用实际路径)
+```
 
-# 2. 开始任务前记录基线
+验证是否成功：
+```bash
+token-stats --list-backends
+```
+
+#### 第 3 步 — 配合各 Agent 使用
+
+**配合 Hermes Agent：**
+
+```bash
+# token-stats 在 Hermes 中已作为 skill 集成。
+# 在 Hermes 聊天中，每次新任务开始时：
 token-stats --save-baseline
 
-# 3. 正常使用你的 AI 编码助手（任意模型、任意轮次）
+# 正常使用 Hermes 干活...
 
-# 4. 查看本次任务消耗了多少 token
+# 任务结束时统计消耗：
 token-stats --delta
 ```
 
-### 自动检测模式
+**配合 Claude Code：**
 
-`token-stats` 自动检测你正在使用的 Agent 框架：
+```bash
+# 先在终端中保存基线：
+token-stats --save-baseline --backend claude-code
+
+# 然后启动 Claude Code 工作：
+claude
+
+# 退出 Claude Code 后查看消耗：
+token-stats --delta --backend claude-code
+```
+
+**配合 OpenClaw：**
+
+```bash
+token-stats --save-baseline --backend openclaw
+# 使用 OpenClaw...
+token-stats --delta --backend openclaw
+```
+
+**配合 CodeX：**
+
+```bash
+token-stats --save-baseline --backend codex
+# 使用 CodeX...
+token-stats --delta --backend codex
+```
+
+---
+
+### 🐧 Linux
+
+**默认 shell：** bash
+
+#### 第 1 步 — 安装 token-stats
+
+```bash
+# 方式一：ClawHub
+clawhub install agent-usage-stats
+
+# 方式二：直接下载
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
+```
+
+#### 第 2 步 — 配置命令别名
+
+```bash
+# 添加到 ~/.bashrc
+echo 'alias token-stats="python3 ~/.hermes/skills/agent-usage-stats/token-stats.py"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### 第 3 步 — 配合各 Agent 使用
+
+各 Agent 的使用命令与 macOS 完全一致，见上方 macOS 章节：
+
+```bash
+# Hermes Agent
+token-stats --save-baseline    # 任务前
+token-stats --delta            # 任务后
+
+# Claude Code
+token-stats --save-baseline --backend claude-code
+claude
+token-stats --delta --backend claude-code
+
+# OpenClaw / CodeX — 同样模式，换后端参数即可
+```
+
+---
+
+### 🪟 Windows
+
+**默认 shell：** PowerShell
+
+#### 第 1 步 — 安装 token-stats
+
+```powershell
+# 方式一：ClawHub（需要 Node.js）
+clawhub install agent-usage-stats
+
+# 方式二：直接下载（PowerShell）
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py" -OutFile "token-stats.py"
+```
+
+#### 第 2 步 — 配置命令
+
+```powershell
+# 添加到 PowerShell 配置文件
+echo "`nfunction token-stats { python3 `"$HOME\.hermes\skills\agent-usage-stats\token-stats.py`" @args }" >> $PROFILE
+
+# 或重新加载配置
+. $PROFILE
+```
+
+#### 第 3 步 — 配合各 Agent 使用
+
+**配合 Hermes Agent：**
+
+```powershell
+token-stats --save-baseline
+# 在 QQ/Telegram/终端中使用 Hermes...
+token-stats --delta
+```
+
+**配合 Claude Code：**
+
+```powershell
+token-stats --save-baseline --backend claude-code
+claude
+token-stats --delta --backend claude-code
+```
+
+**配合 CodeX：**
+
+```powershell
+token-stats --save-baseline --backend codex
+# 使用 CodeX...
+token-stats --delta --backend codex
+```
+
+> **注意：** OpenClaw 后端在 Windows 上支持有限（需自定义路径）。
+
+---
+
+## 🔧 基础用法
+
+### 自动检测模式
 
 ```bash
 # 列出检测到的后端
@@ -65,21 +222,7 @@ token-stats --validate
 token-stats --summary
 ```
 
-### 手动指定后端
-
-```bash
-# Claude Code
-token-stats --save-baseline --backend claude-code
-token-stats --delta --backend claude-code
-
-# OpenClaw
-token-stats --save-baseline --backend openclaw
-token-stats --delta --backend openclaw
-
-# CodeX
-token-stats --save-baseline --backend codex
-token-stats --delta --backend codex
-```
+---
 
 ## 📊 输出示例
 
@@ -96,11 +239,14 @@ token-stats --delta --backend codex
 ```
 
 **每行的 X/Y 格式说明：**
+
 | 部分 | 含义 |
 |------|------|
 | **X**（左边） | **本次任务** — 自 `--save-baseline` 以来的消耗 |
 | **Y**（右边） | **会话累计** — 数据文件中的全部累计值 |
 | **占用 %** | 上下文窗口使用率（基于模型自动检测） |
+
+---
 
 ## ⚙️ 工作原理
 
@@ -116,6 +262,8 @@ token-stats --delta --backend codex
 
 工具在任务开始时保存 Agent 数据的"基线快照"。任务结束时对比当前数据和基线，只输出**差值**——即本次任务的真实消耗。所有数据均来自 API 服务商返回的 `usage` 对象，由 Agent 框架自动记录。
 
+---
+
 ## 🔍 数据完整性验证
 
 ```bash
@@ -127,6 +275,8 @@ token-stats --validate
 - 数据库/文件是否存在
 - Token 数据是否合理（非负、有 API 调用时 token 不应为 0）
 - 所有必要字段是否已填充
+
+---
 
 ## 🐛 支持的模型（上下文窗口自动检测）
 
@@ -141,11 +291,14 @@ token-stats --validate
 
 未匹配的模型默认 128K。模型映射表可扩展，欢迎 PR！
 
+---
+
 ## 📦 作为 Hermes Agent Skill 使用
 
-`token-stats` 也可作为 [Hermes Agent](https://github.com/nousresearch/hermes-agent) 的 skill 安装：
-
 ```bash
+# 通过 ClawHub 安装：
+clawhub install agent-usage-stats
+
 # 在 Hermes 中直接使用：
 token-stats --save-baseline   # 任务开始
 token-stats --delta            # 任务结束
@@ -153,15 +306,21 @@ token-stats --delta            # 任务结束
 
 本仓库中的 `SKILL.md` 提供了完整的 Hermes 集成配置，支持任务后自动输出统计。
 
+---
+
 ## 🔧 环境要求
 
 - Python 3.10+
 - 无需外部依赖（仅使用标准库：`sqlite3`, `json`, `os` 等）
 - 至少安装一种 Agent：Hermes Agent / Claude Code / OpenClaw / CodeX
 
+---
+
 ## 📄 开源协议
 
 MIT
+
+---
 
 ## 🤝 贡献指南
 

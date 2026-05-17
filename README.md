@@ -27,31 +27,187 @@
 - **Auto-detect**: No config needed — just run it
 - **Colorful table output**: Per-model breakdown with context warnings
 
-## 🚀 Quick Start
+---
+
+## 🚀 Install by Operating System
+
+Pick your OS below for step-by-step instructions including per-agent usage.
+
+---
+
+### 🍎 macOS
+
+**Default shell:** zsh (since macOS Catalina)
+
+#### Step 1 — Install token-stats
 
 ```bash
-# Option A: Install via ClawHub (recommended for OpenClaw users)
+# Option A: ClawHub (recommended for OpenClaw users, installs as a skill)
 clawhub install agent-usage-stats
-# After install, the script is at ~/.hermes/skills/agent-usage-stats/token-stats.py
-# Set up an alias for convenience:
+
+# Option B: Direct download (zero dependencies, universal)
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
+```
+
+#### Step 2 — Set up the command
+
+```bash
+# Add alias to ~/.zshrc
 echo 'alias token-stats="python3 ~/.hermes/skills/agent-usage-stats/token-stats.py"' >> ~/.zshrc
 source ~/.zshrc
 
-# Option B: Install via pip (coming soon)
-# pip install token-stats
+# (If downloading directly, use the script's actual path)
+```
 
-# Option C: Just download the script (zero dependencies)
-curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
-chmod +x token-stats.py
+Verify it works:
+```bash
+token-stats --list-backends
+```
 
-# 2. Start a task
+#### Step 3 — Use with your agent
+
+**With Hermes Agent:**
+
+```bash
+# token-stats is already loaded as a skill inside Hermes.
+# At the start of a task inside the Hermes chat:
 token-stats --save-baseline
 
-# 3. Do your work with your AI agent (any model, any number of turns)
+# Work with Hermes normally...
 
-# 4. See how many tokens you used
+# At the end of the task:
 token-stats --delta
 ```
+
+**With Claude Code:**
+
+```bash
+# First, save a baseline in your terminal:
+token-stats --save-baseline --backend claude-code
+
+# Then start Claude Code and work:
+claude
+
+# After exiting Claude Code, see what you consumed:
+token-stats --delta --backend claude-code
+```
+
+**With OpenClaw:**
+
+```bash
+token-stats --save-baseline --backend openclaw
+# Use OpenClaw...
+token-stats --delta --backend openclaw
+```
+
+**With CodeX:**
+
+```bash
+token-stats --save-baseline --backend codex
+# Use CodeX...
+token-stats --delta --backend codex
+```
+
+---
+
+### 🐧 Linux
+
+**Default shell:** bash
+
+#### Step 1 — Install token-stats
+
+```bash
+# Option A: ClawHub
+clawhub install agent-usage-stats
+
+# Option B: Direct download
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
+```
+
+#### Step 2 — Set up the command
+
+```bash
+# Add alias to ~/.bashrc
+echo 'alias token-stats="python3 ~/.hermes/skills/agent-usage-stats/token-stats.py"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Step 3 — Use with your agent
+
+The per-agent commands are **identical** to macOS — see the macOS section above. All `--backend` flags work the same way.
+
+```bash
+# Hermes Agent
+token-stats --save-baseline    # before task
+token-stats --delta            # after task
+
+# Claude Code
+token-stats --save-baseline --backend claude-code
+claude
+token-stats --delta --backend claude-code
+
+# OpenClaw / CodeX — same pattern with respective backend flag
+```
+
+---
+
+### 🪟 Windows
+
+**Default shell:** PowerShell
+
+#### Step 1 — Install token-stats
+
+```powershell
+# Option A: ClawHub (via Node.js)
+clawhub install agent-usage-stats
+
+# Option B: Direct download (PowerShell)
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py" -OutFile "token-stats.py"
+```
+
+#### Step 2 — Set up the command
+
+```powershell
+# Add to PowerShell profile
+echo "`nfunction token-stats { python3 `"$HOME\.hermes\skills\agent-usage-stats\token-stats.py`" @args }" >> $PROFILE
+
+# Or reload profile
+. $PROFILE
+```
+
+#### Step 3 — Use with your agent
+
+**With Hermes Agent:**
+
+```powershell
+token-stats --save-baseline
+# Use Hermes in QQ/Telegram/terminal...
+token-stats --delta
+```
+
+**With Claude Code:**
+
+```powershell
+token-stats --save-baseline --backend claude-code
+claude
+token-stats --delta --backend claude-code
+```
+
+**With CodeX:**
+
+```powershell
+token-stats --save-baseline --backend codex
+# Use CodeX...
+token-stats --delta --backend codex
+```
+
+> **Note:** OpenClaw backend has limited support on Windows (custom path required).
+
+---
+
+## 🔧 Basic Usage
 
 ### Auto-detect Mode
 
@@ -63,23 +219,12 @@ token-stats --list-backends
 
 # Validate data integrity
 token-stats --validate
+
+# View current cumulative usage
+token-stats --summary
 ```
 
-### Manual Backend Selection
-
-```bash
-# Claude Code
-token-stats --save-baseline --backend claude-code
-token-stats --delta --backend claude-code
-
-# OpenClaw
-token-stats --save-baseline --backend openclaw
-token-stats --delta --backend openclaw
-
-# CodeX
-token-stats --save-baseline --backend codex
-token-stats --delta --backend codex
-```
+---
 
 ## 📊 Output Example
 
@@ -96,11 +241,14 @@ token-stats --delta --backend codex
 ```
 
 **Legend per row (X/Y format):**
+
 | Part | Meaning |
 |------|---------|
 | **X** (left) | **This task** — tokens/calls since `--save-baseline` |
 | **Y** (right) | **Session cumulative** — total from the data file |
 | **Usage %** | Context window usage (based on auto-detected model window) |
+
+---
 
 ## ⚙️ How It Works
 
@@ -114,6 +262,8 @@ flowchart LR
 
 The tool saves a snapshot of your agent's usage data as a "baseline" when you start a task. When the task ends, it compares current data against the baseline and shows only the **delta** — what was consumed during your task. All data comes from the API provider's returned `usage` object, recorded by the agent framework.
 
+---
+
 ## 🔍 Data Integrity
 
 ```bash
@@ -125,6 +275,8 @@ This checks:
 - Database/file existence
 - Token data is reasonable (non-negative, non-zero when there are API calls)
 - All required fields are populated
+
+---
 
 ## 🐛 Supported Models (Context Window Auto-Detect)
 
@@ -139,17 +291,24 @@ This checks:
 
 Unrecognized models default to 128K. The model map is extensible — contributions welcome!
 
+---
+
 ## 📦 As a Hermes Skill
 
 `token-stats` can also be installed as a [Hermes Agent](https://github.com/nousresearch/hermes-agent) skill:
 
 ```bash
-# In Hermes, just run:
+# Installed via ClawHub:
+clawhub install agent-usage-stats
+
+# Usage inside Hermes chat:
 token-stats --save-baseline   # At task start
 token-stats --delta            # At task end
 ```
 
 The `SKILL.md` in this repo provides full Hermes integration with automatic post-task reporting.
+
+---
 
 ## 🔧 Requirements
 
@@ -157,9 +316,13 @@ The `SKILL.md` in this repo provides full Hermes integration with automatic post
 - No external dependencies (stdlib only: `sqlite3`, `json`, `os`, etc.)
 - One of: Hermes Agent / Claude Code / OpenClaw / CodeX
 
+---
+
 ## 📄 License
 
 MIT
+
+---
 
 ## 🤝 Contributing
 
