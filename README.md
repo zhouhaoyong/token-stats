@@ -32,6 +32,10 @@
 ```bash
 # Option A: Install via ClawHub (recommended for OpenClaw users)
 clawhub install agent-usage-stats
+# After install, the script is at ~/.hermes/skills/agent-usage-stats/token-stats.py
+# Set up an alias for convenience:
+echo 'alias token-stats="python3 ~/.hermes/skills/agent-usage-stats/token-stats.py"' >> ~/.zshrc
+source ~/.zshrc
 
 # Option B: Install via pip (coming soon)
 # pip install token-stats
@@ -41,7 +45,7 @@ curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-sta
 chmod +x token-stats.py
 
 # 2. Start a task
-./token-stats.py --save-baseline
+token-stats --save-baseline
 
 # 3. Do your work with your AI agent (any model, any number of turns)
 

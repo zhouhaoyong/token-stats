@@ -32,13 +32,17 @@
 ```bash
 # 方式一：ClawHub 安装（OpenClaw 用户推荐）
 clawhub install agent-usage-stats
+# 安装后脚本在 ~/.hermes/skills/agent-usage-stats/token-stats.py
+# 建议设置别名方便使用：
+echo 'alias token-stats="python3 ~/.hermes/skills/agent-usage-stats/token-stats.py"' >> ~/.zshrc
+source ~/.zshrc
 
 # 方式二：直接下载（零依赖）
 curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
 chmod +x token-stats.py
 
 # 2. 开始任务前记录基线
-./token-stats.py --save-baseline
+token-stats --save-baseline
 
 # 3. 正常使用你的 AI 编码助手（任意模型、任意轮次）
 
