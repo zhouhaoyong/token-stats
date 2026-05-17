@@ -81,7 +81,8 @@ def fmt_pct(pct: float) -> str:
 
 
 def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
-    """Format per-model today data. Returns [first_line, ...] for printing."""
+    """Format per-model today data. Returns [first_line, ...] for printing.
+    Uses 📅 今日 prefix for single-model, or header + per-model + 合计 for multi."""
     if not per_model:
         return []
     models = []
@@ -97,28 +98,40 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
         to += o
         tc += c
         tca += ca
-    name_w = max((len(m) for m,_,_,_,_ in models), default=4)
-    if len(models) > 1:
-        name_w = max(name_w, 4)
-    
+
     lines = []
-    for m, i, o, c, ca in models:
+    if len(models) == 1:
+        # Single model: compact format with 📅 今日 prefix
+        m, i, o, c, ca = models[0]
         t = i + o
-        parts = [f"输入 {fmt_num_fn(i)} tokens", f"输出 {fmt_num_fn(o)} tokens", f"总计 {fmt_num_fn(t)} tokens"]
+        parts = [f"输入 {fmt_num_fn(i)} tokens", f"输出 {fmt_num_fn(o)} tokens",
+                 f"总计 {fmt_num_fn(t)} tokens"]
         if c:
             parts.append(f"缓存 {fmt_num_fn(c)} tokens")
         parts.append(f"调用 {ca} 次")
-        lines.append(f"  {m:<{name_w}} | {" | ".join(parts)}")
-    
-    if len(models) > 1:
-        sep_len = len(lines[0]) - 2  # minus indent
-        lines.append(f"  {'─' * sep_len}")
+        lines.append(f"  📅 今日 | {' | '.join(parts)}")
+    else:
+        # Multi model: header + per-model + separator + 合计
+        name_w = max((len(m) for m,_,_,_,_ in models), default=4)
+        name_w = max(name_w, 4)
+        lines.append("  📅 今日")
+        for m, i, o, c, ca in models:
+            t = i + o
+            parts = [f"输入 {fmt_num_fn(i)} tokens", f"输出 {fmt_num_fn(o)} tokens",
+                     f"总计 {fmt_num_fn(t)} tokens"]
+            if c:
+                parts.append(f"缓存 {fmt_num_fn(c)} tokens")
+            parts.append(f"调用 {ca} 次")
+            lines.append(f"    {m:<{name_w}} | {' | '.join(parts)}")
+        sep_len = len(lines[1]) - 4  # minus indent
+        lines.append(f"    {'─' * sep_len}")
         tt = ti + to
-        parts2 = [f"输入 {fmt_num_fn(ti)} tokens", f"输出 {fmt_num_fn(to)} tokens", f"总计 {fmt_num_fn(tt)} tokens"]
+        parts2 = [f"输入 {fmt_num_fn(ti)} tokens", f"输出 {fmt_num_fn(to)} tokens",
+                  f"总计 {fmt_num_fn(tt)} tokens"]
         if tc:
             parts2.append(f"缓存 {fmt_num_fn(tc)} tokens")
         parts2.append(f"调用 {tca} 次")
-        lines.append(f"  {'合计':<{name_w}} | {" | ".join(parts2)}")
+        lines.append(f"    {'合计':<{name_w}} | {' | '.join(parts2)}")
     return lines
 MODEL_CONTEXT_MAP = {
     "deepseek-v4-flash": 1_048_576,
