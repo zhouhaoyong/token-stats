@@ -265,6 +265,13 @@ token-stats -b hermes,claude-code --export
 
 # 导出本机所有 Agent
 token-stats --all --export
+
+# 导出多 Agent + 时间段（以下组合均支持）
+token-stats -b hermes,claude-code --today --export          # 多个 Agent 的今日统计
+token-stats --all --today --export                          # 所有 Agent 的今日统计
+token-stats --all --from 2026-01-01 --to 2026-05-18 --export  # 所有 Agent 的指定时间段
+token-stats -b hermes,claude-code --yesterday --export      # 多个 Agent 的昨日统计
+token-stats -b hermes,claude-code --week --export           # 多个 Agent 的本周统计
 ```
 
  流程：先显示格式化汇总 → 请输入导出目录路径 → 选择 JSON 还是 CSV。

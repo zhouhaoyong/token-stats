@@ -249,6 +249,13 @@ token-stats -b hermes,claude-code --export
 
 # Export all installed agents
 token-stats --all --export
+
+# Multi-agent + time range (all combinations work)
+token-stats -b hermes,claude-code --today --export          # Multiple agents, today only
+token-stats --all --today --export                          # All agents, today only
+token-stats --all --from 2025-01-01 --to 2025-01-31 --export  # All agents, custom period
+token-stats -b hermes,claude-code --yesterday --export      # Multiple agents, yesterday
+token-stats -b hermes,claude-code --week --export           # Multiple agents, this week
 ```
 
 Flow: shows stats → prompts for directory → prompts for JSON or CSV.
