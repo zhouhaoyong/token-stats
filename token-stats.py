@@ -444,31 +444,62 @@ class OpenClawAgent(BaseAgent):
             )
         try:
             with open(OPENCLAW_SESSIONS, encoding="utf-8") as f:
-                idx = json.load(f)
-            sessions = idx if isinstance(idx, list) else idx.get("sessions", [])
-            if not sessions:
+                data = json.load(f)
+
+            # sessions.json 结构: {"agent:main:main": {sessionObj}, "agent:...": {...}}
+            agents = []
+            if isinstance(data, dict):
+                for agent_key, session in data.items():
+                    if isinstance(session, dict):
+                        agents.append(session)
+            elif isinstance(data, list):
+                agents = data
+
+            if not agents:
                 return AgentData(
                     name="openclaw", display_name="OpenClaw",
                     stats={}, raw="OpenClaw: 尚无会话"
                 )
 
-            total_input = sum(s.get("inputTokens", 0) for s in sessions if isinstance(s, dict))
-            total_output = sum(s.get("outputTokens", 0) for s in sessions if isinstance(s, dict))
-            latest = max(sessions, key=lambda s: s.get("lastActivityAt", 0)) if isinstance(sessions[0], dict) else sessions[0]
-            model = latest.get("model", "unknown") if isinstance(latest, dict) else "unknown"
+            total_input = sum(s.get("inputTokens", 0) for s in agents)
+            total_output = sum(s.get("outputTokens", 0) for s in agents)
+            total_cache = sum(s.get("cacheRead", 0) for s in agents)
+
+            # 找最近活跃的
+            latest = max(agents, key=lambda s: s.get("startedAt", 0) or s.get("updatedAt", 0))
+            model = latest.get("model", "unknown")
+            provider = latest.get("modelProvider", "")
+            model_display = f"{model}" if not provider else f"{model} ({provider})"
+            context = latest.get("contextTokens", DEFAULT_CONTEXT)
 
             stats = {
                 "model": model,
                 "input_tokens": total_input,
                 "output_tokens": total_output,
+                "cache_read": total_cache,
                 "total_tokens": total_input + total_output,
-                "session_count": len(sessions),
+                "context_window": context,
+                "agent_count": len(agents),
             }
-            raw = (
-                f"📊 OpenClaw — {model}\n"
-                f"  总 tokens: {fmt_num(total_input + total_output)}\n"
-                f"  会话数: {len(sessions)}"
-            )
+
+            # 如果只有 1 个 agent，显示上下文占用
+            if len(agents) == 1:
+                total = total_input + total_output
+                pct = round(total / context * 100, 1) if context else 0
+                raw = (
+                    f"📊 OpenClaw — {model_display}\n"
+                    f"  上下文: {fmt_num(total)}/{fmt_num(context)} ({fmt_pct(pct)})\n"
+                    f"  输入: {fmt_num(total_input)} | 输出: {fmt_num(total_output)}\n"
+                    f"  缓存读取: {fmt_num(total_cache)}"
+                )
+            else:
+                raw = (
+                    f"📊 OpenClaw\n"
+                    f"  共 {len(agents)} 个 Agent\n"
+                    f"  最新: {model_display}\n"
+                    f"  总 tokens: {fmt_num(total_input + total_output)}\n"
+                    f"  缓存读取: {fmt_num(total_cache)}"
+                )
             return AgentData(name="openclaw", display_name="OpenClaw", stats=stats, raw=raw)
         except Exception as e:
             return AgentData(
