@@ -114,6 +114,25 @@ token-stats -b hermes
 
 If all three checks produce output, installation is successful 🎉
 
+## Updating
+
+```bash
+# Pull the latest version from ClawHub
+clawhub update agent-usage-stats
+
+# Re-run setup (needed if the script changed)
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+
+# Verify version
+token-stats --version
+```
+
+> 💡 It's recommended to re-run `setup` after every update so the global command stays current.
+> If `clawhub update` doesn't change the version, use `--force`:
+> ```bash
+> clawhub install agent-usage-stats --force
+> ```
+
 > ⚠️ ClawHub installs skills into a `skills/` folder under your **current working directory**.
 > Run `clawhub install` from `~` or `~/.hermes/` to keep things tidy.
 

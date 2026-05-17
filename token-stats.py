@@ -407,26 +407,26 @@ class BaseAgent(ABC):
                     print(line)
 
             # 总增量（最新累计 - 初始基线）
-            total_d_in = total_d_out = total_d_cache = total_d_calls = 0
+            total_d_tok = total_d_cache = total_d_calls = 0
             delta_lines = []
             for mn, mv in sorted(bl_models.items()):
                 init = bl_initial.get(mn, {"input": 0, "output": 0, "cache": 0, "calls": 0})
                 d_in = mv["input"] - init["input"]
                 d_out = mv["output"] - init["output"]
+                d_tok = d_in + d_out
                 d_cache = mv.get("cache", 0) - init.get("cache", 0)
                 d_calls = mv["calls"] - init["calls"]
-                total_d_in += d_in
-                total_d_out += d_out
+                total_d_tok += d_tok
                 total_d_cache += d_cache
                 total_d_calls += d_calls
-                if d_in > 0 or d_out > 0 or d_cache > 0 or d_calls > 0:
-                    parts = [f"输入 +{fmt_num(d_in)}", f"输出 +{fmt_num(d_out)}"]
+                if d_tok > 0 or d_cache > 0 or d_calls > 0:
+                    parts = [f"tokens +{fmt_num(d_tok)}"]
                     if d_cache:
                         parts.append(f"缓存 +{fmt_num(d_cache)}")
                     delta_lines.append(f"  {mn} | {' | '.join(parts)} | +{d_calls} calls")
 
             if delta_lines:
-                print(f"\n  监控期间增量 (总 tokens +{fmt_num(total_d_in + total_d_out)}):")
+                print(f"\n  监控期间增量 (总 tokens +{fmt_num(total_d_tok)}):")
                 for dl in delta_lines:
                     print(dl)
         else:
