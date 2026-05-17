@@ -1,7 +1,7 @@
 ---
 name: agent-usage-stats
 description: "每次任务完成后精确汇报 token 消耗和大模型调用次数。跨平台支持 Hermes/Claude Code/OpenClaw/CodeX，含多模型场景的按模型分块表格统计"
-version: 1.0.0
+version: 1.3.1
 author: zhouhaoyong
 license: MIT
 source: https://github.com/zhouhaoyong/token-stats
