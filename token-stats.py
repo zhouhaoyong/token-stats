@@ -274,7 +274,9 @@ class BaseAgent(ABC):
             }
 
         # ── 初始状态 ──
+        bl_initial = {k: dict(v) for k, v in bl_models.items()}  # 保存初始基线，用于最终汇总
         print("初始状态:")
+        has_data = False
         for mn, mv in bl_models.items():
             cw = detect_context(mn)
             line = format_model_line(mn, mv["input"], mv["output"],
@@ -282,6 +284,9 @@ class BaseAgent(ABC):
                                      context_window=cw)
             if line:
                 print(line)
+                has_data = True
+        if not has_data:
+            print("  (暂无数据，等待会话开始...)")
         print()
 
         # ── 监控循环 ──
@@ -369,20 +374,48 @@ class BaseAgent(ABC):
             if elapsed < interval and not stop_event.is_set():
                 _interruptible_sleep(interval - elapsed)
 
-        # ── 停止汇总：用时间段查询展示完整监控数据 ──
-        watch_end = time.time()
+        # ── 停止汇总：基于最新累计值 ──
         print()
         print("━" * 60)
         print("  📊 本次监控汇总")
         print("━" * 60)
-        try:
-            summary = self.collect(from_ts=watch_start, to_ts=watch_end)
-            if summary.stats:
-                print(summary.raw)
-            else:
-                print("  监控期间无数据")
-        except Exception as e:
-            print(f"  ⚠️ 获取汇总失败: {e}")
+
+        # 最终累计状态
+        if bl_models:
+            print("  最终状态:")
+            for mn, mv in sorted(bl_models.items()):
+                cw = detect_context(mn)
+                line = format_model_line(mn, mv["input"], mv["output"],
+                                         mv.get("cache", 0), mv.get("calls", 0),
+                                         context_window=cw)
+                if line:
+                    print(line)
+
+            # 总增量（最新累计 - 初始基线）
+            total_d_in = total_d_out = total_d_cache = total_d_calls = 0
+            delta_lines = []
+            for mn, mv in sorted(bl_models.items()):
+                init = bl_initial.get(mn, {"input": 0, "output": 0, "cache": 0, "calls": 0})
+                d_in = mv["input"] - init["input"]
+                d_out = mv["output"] - init["output"]
+                d_cache = mv.get("cache", 0) - init.get("cache", 0)
+                d_calls = mv["calls"] - init["calls"]
+                total_d_in += d_in
+                total_d_out += d_out
+                total_d_cache += d_cache
+                total_d_calls += d_calls
+                if d_in > 0 or d_out > 0 or d_cache > 0 or d_calls > 0:
+                    parts = [f"输入 +{fmt_num(d_in)}", f"输出 +{fmt_num(d_out)}"]
+                    if d_cache:
+                        parts.append(f"缓存 +{fmt_num(d_cache)}")
+                    delta_lines.append(f"  {mn} | {' | '.join(parts)} | +{d_calls} calls")
+
+            if delta_lines:
+                print(f"\n  监控期间增量 (总 tokens +{fmt_num(total_d_in + total_d_out)}):")
+                for dl in delta_lines:
+                    print(dl)
+        else:
+            print("  监控期间无数据")
         print("👋 监控已停止")
 
 
