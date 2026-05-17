@@ -338,36 +338,52 @@ class BaseAgent(ABC):
                 elif d_tok < 0 or d_calls < 0:
                     bl_models[mn] = mv
 
-            # 每个 tick 都输出（有变化显示变化，无变化也显示一行）
+            # 每个 tick 合并显示：增量/累计（一行完成）
             ts = datetime.now().strftime("%H:%M:%S")
-            if changed_models:
-                print(f"── [{ts}] +{fmt_num(total_delta_tok)} tokens ({total_delta_calls} calls) ──")
-                for mn, d_in, d_out, d_tok, d_calls, d_cache in changed_models:
-                    parts = [f"+{fmt_num(d_tok)} tokens"]
-                    if d_in:
-                        parts.append(f"+{fmt_num(d_in)} 输入")
-                    if d_out:
-                        parts.append(f"+{fmt_num(d_out)} 输出")
-                    if d_cache:
-                        parts.append(f"+{fmt_num(d_cache)} 缓存")
-                    print(f"  {mn} | {' | '.join(parts)} | {d_calls} calls")
-                    bl_models[mn] = mv
+            any_delta = bool(changed_models)
+            if any_delta:
+                summary_parts = []
+                if total_delta_tok:
+                    summary_parts.append(f"+{fmt_num(total_delta_tok)} tokens")
+                if total_delta_calls:
+                    summary_parts.append(f"+{total_delta_calls} 调用")
+                print(f"── [{ts}] {' '.join(summary_parts)} ──")
             else:
                 print(f"── [{ts}] 无变化 ──")
 
-            # 每个 tick 都显示当前累计状态（含上下文占比）
-            cumul_lines = []
             for mn, mv in now_models.items():
+                bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+                d_in = mv["input"] - bl["input"]
+                d_out = mv["output"] - bl["output"]
+                d_cache = mv.get("cache", 0) - bl.get("cache", 0)
+                d_calls = mv["calls"] - bl["calls"]
+                has_delta = d_in > 0 or d_out > 0 or d_cache > 0 or d_calls > 0
+
                 cw = detect_context(mn)
-                line = format_model_line(mn, mv["input"], mv["output"],
-                                         mv.get("cache", 0), mv.get("calls", 0),
-                                         context_window=cw)
-                if line:
-                    cumul_lines.append(line)
-            if cumul_lines:
-                print("  当前状态:")
-                for cl in cumul_lines:
-                    print(cl)
+                total = mv["input"] + mv["output"]
+                pct = round(total / cw * 100, 1) if cw else 0
+                ctx_str = f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})"
+
+                parts = [ctx_str]
+
+                if has_delta:
+                    parts.append(f"输入 +{fmt_num(d_in)}/累计 {fmt_num(mv['input'])}")
+                    parts.append(f"输出 +{fmt_num(d_out)}/累计 {fmt_num(mv['output'])}")
+                    if d_cache or mv.get("cache", 0):
+                        parts.append(f"缓存 +{fmt_num(d_cache)}/累计 {fmt_num(mv.get('cache', 0))}")
+                    parts.append(f"调用 +{d_calls}/窗口累计 {mv['calls']}")
+                else:
+                    parts.append(f"输入 {fmt_num(mv['input'])}")
+                    parts.append(f"输出 {fmt_num(mv['output'])}")
+                    if mv.get("cache", 0):
+                        parts.append(f"缓存 {fmt_num(mv['cache'])}")
+                    parts.append(f"调用 {mv['calls']}")
+
+                print(f"  {mn} | {' | '.join(parts)}")
+
+                # 更新基线
+                if has_delta:
+                    bl_models[mn] = mv
 
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
