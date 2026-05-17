@@ -15,6 +15,21 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 
 ---
 
+## Why token-stats
+
+With plenty of log viewers out there, why pick this one?
+
+| What you want to do | How | What it solves |
+|---------------------|-----|----------------|
+| **📊 Check the bill** — one look at your spend | `token-stats` | All agents, all models, one line each. Only models with data show up — no noise |
+| **📡 Watch it live** — see context fill up in real time | `token-stats -b hermes --watch` | Per-round delta + current context ratio. Alerts before things get tight, tells you when to `/new` |
+| **📅 Compare periods** — did today burn more than yesterday? | `--today --compare --a today --b yesterday` | Any time range aggregation, side-by-side comparison with diff. Trends at a glance |
+| **💾 Export** — save stats for records | `--export` | Interactive directory + format selection (JSON/CSV). Cross-platform paths |
+
+**Zero dependencies** — pure Python stdlib, no pip install needed. macOS / Linux supported.
+
+---
+
 ## Environment Requirements
 
 Before installing `token-stats`, make sure you have these:
