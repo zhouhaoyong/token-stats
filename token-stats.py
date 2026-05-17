@@ -85,9 +85,12 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
     Uses 📅 今日 prefix for single-model, or header + per-model + 合计 for multi."""
     if not per_model:
         return []
+    filtered = [pm for pm in per_model if not _skip_model(pm)]
+    if not filtered:
+        return []
     models = []
     ti = to = tc = tca = 0
-    for pm in per_model:
+    for pm in filtered:
         m = pm.get("model", "unknown")
         i = pm.get("input", 0) or 0
         o = pm.get("output", 0) or 0
