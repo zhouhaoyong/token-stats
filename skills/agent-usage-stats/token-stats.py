@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.0.9"
+VERSION = "2.0.8"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
 sys.stdout.reconfigure(line_buffering=True)
@@ -350,20 +350,6 @@ class BaseAgent(ABC):
             else:
                 print(f"── [{ts}] 无变化 ──")
 
-            # 每个 tick 都显示当前累计状态（含上下文占比）
-            cumul_lines = []
-            for mn, mv in now_models.items():
-                cw = detect_context(mn)
-                line = format_model_line(mn, mv["input"], mv["output"],
-                                         mv.get("cache", 0), mv.get("calls", 0),
-                                         context_window=cw)
-                if line:
-                    cumul_lines.append(line)
-            if cumul_lines:
-                print("  当前状态:")
-                for cl in cumul_lines:
-                    print(cl)
-
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
             if elapsed < interval and not stop_event.is_set():
@@ -391,25 +377,6 @@ class BaseAgent(ABC):
 # ═══════════════════════════════════════════════════
 
 HERMES_DB = os.path.expanduser("~/.hermes/state.db")
-HERMES_SESSIONS_FILE = os.path.expanduser("~/.hermes/sessions/sessions.json")
-
-
-def _hermes_current_session_id() -> str | None:
-    """从 sessions.json 读取当前活跃会话 ID。"""
-    try:
-        with open(HERMES_SESSIONS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        # sessions.json 可能是一个 dict，key 是 platform:chat_id
-        # 也可能是有特定结构的 dict
-        if not isinstance(data, dict):
-            return None
-        # 找到第一个有 session_id 的条目
-        for key, val in data.items():
-            if isinstance(val, dict) and val.get("session_id"):
-                return val["session_id"]
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    return None
 
 
 class HermesAgent(BaseAgent):
@@ -494,21 +461,11 @@ class HermesAgent(BaseAgent):
                              stats=stats, raw=raw, per_model=per_model_list)
 
         # ── 当前会话 ──
-        # 优先从 sessions.json 获取当前活跃会话 ID，精确查询
-        current_id = _hermes_current_session_id()
-        if current_id:
-            cur = conn.execute(
-                "SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
-                "api_call_count, tool_call_count, title "
-                "FROM sessions WHERE id = ?",
-                (current_id,)
-            )
-        else:
-            cur = conn.execute(
-                "SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
-                "api_call_count, tool_call_count, title "
-                "FROM sessions ORDER BY started_at DESC LIMIT 1"
-            )
+        cur = conn.execute(
+            "SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
+            "api_call_count, tool_call_count, title "
+            "FROM sessions ORDER BY started_at DESC LIMIT 1"
+        )
         row = cur.fetchone()
 
         if not row:
@@ -1009,67 +966,63 @@ def show_menu(installed: list[type[BaseAgent]]) -> BaseAgent:
 
 def export_interactive(data: AgentData, agent: BaseAgent):
     """交互式导出统计"""
-    try:
-        # Step 1: 输入目录
-        while True:
-            dir_input = input("请输入导出目录路径: ").strip()
-            if not dir_input or dir_input.lower() == "q":
-                print("已取消导出")
-                return
-            dir_path = os.path.expanduser(dir_input)
-            if os.path.isdir(dir_path):
-                break
-            print(f"⚠️ 目录不存在: {dir_path}")
-            print("请确保目录存在，或输入 q 取消")
+    # Step 1: 输入目录
+    while True:
+        dir_input = input("请输入导出目录路径: ").strip()
+        if not dir_input or dir_input.lower() == "q":
+            print("已取消导出")
+            return
+        dir_path = os.path.expanduser(dir_input)
+        if os.path.isdir(dir_path):
+            break
+        print(f"⚠️ 目录不存在: {dir_path}")
+        print("请确保目录存在，或输入 q 取消")
 
-        # Step 2: 选择格式
-        print("\n选择导出格式:")
-        print("  [1] JSON")
-        print("  [2] CSV")
-        fmt_choice = input("请选择 (1/2): ").strip().lower()
+    # Step 2: 选择格式
+    print("\n选择导出格式:")
+    print("  [1] JSON")
+    print("  [2] CSV")
+    fmt_choice = input("请选择 (1/2): ").strip().lower()
 
-        if fmt_choice in ("1", "json"):
-            fmt = "json"
-        elif fmt_choice in ("2", "csv"):
-            fmt = "csv"
-        else:
-            print(f"⚠️ 不支持格式 '{fmt_choice}'，默认使用 JSON")
-            fmt = "json"
+    if fmt_choice in ("1", "json"):
+        fmt = "json"
+    elif fmt_choice in ("2", "csv"):
+        fmt = "csv"
+    else:
+        print(f"⚠️ 不支持格式 '{fmt_choice}'，默认使用 JSON")
+        fmt = "json"
 
-        # Step 3: 写文件
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"token-stats_{agent.name()}_{timestamp}.{fmt}"
-        filepath = os.path.join(dir_path, filename)
+    # Step 3: 写文件
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"token-stats_{agent.name()}_{timestamp}.{fmt}"
+    filepath = os.path.join(dir_path, filename)
 
-        if fmt == "json":
-            export_data = {
-                "tool": "token-stats",
-                "version": VERSION,
-                "agent": agent.name(),
-                "agent_display": agent.display_name(),
-                "exported_at": datetime.now().isoformat(),
-                "stats": data.stats,
-                "per_model": data.per_model or [],
-            }
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
-        else:
-            with open(filepath, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["模型", "输入tokens", "输出tokens", "缓存tokens", "调用次数"])
-                for pm in (data.per_model or []):
-                    writer.writerow([
-                        pm.get("model", "unknown"),
-                        pm.get("input", 0),
-                        pm.get("output", 0),
-                        pm.get("cache", 0),
-                        pm.get("calls", 0),
-                    ])
+    if fmt == "json":
+        export_data = {
+            "tool": "token-stats",
+            "version": VERSION,
+            "agent": agent.name(),
+            "agent_display": agent.display_name(),
+            "exported_at": datetime.now().isoformat(),
+            "stats": data.stats,
+            "per_model": data.per_model or [],
+        }
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+    else:
+        with open(filepath, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["模型", "输入tokens", "输出tokens", "缓存tokens", "调用次数"])
+            for pm in (data.per_model or []):
+                writer.writerow([
+                    pm.get("model", "unknown"),
+                    pm.get("input", 0),
+                    pm.get("output", 0),
+                    pm.get("cache", 0),
+                    pm.get("calls", 0),
+                ])
 
-        print(f"✅ 已导出到: {filepath}")
-    except KeyboardInterrupt:
-        print()
-        print("已取消导出")
+    print(f"✅ 已导出到: {filepath}")
 
 
 # ═══════════════════════════════════════════════════
