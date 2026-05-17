@@ -94,7 +94,7 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.0.7
+# 输出: token-stats v2.1.1
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends

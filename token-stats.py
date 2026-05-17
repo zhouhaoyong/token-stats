@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
 sys.stdout.reconfigure(line_buffering=True)

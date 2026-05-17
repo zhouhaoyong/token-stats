@@ -95,7 +95,7 @@ That's it. Now just type `token-stats` in your terminal.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.0.7
+# Output: token-stats v2.1.1
 
 # Check 2: list installed agents
 token-stats --list-backends
