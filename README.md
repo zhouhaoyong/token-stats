@@ -152,6 +152,9 @@ token-stats -b claude-code
 token-stats -b codex
 token-stats -b openclaw
 
+# Multiple agents at once (comma-separated)
+token-stats -b hermes,claude-code
+
 # All agents at once
 token-stats --all
 
@@ -240,9 +243,54 @@ token-stats -b hermes --last-7d --export
 
 # Export custom date range
 token-stats -b hermes --from 2025-01-01 --to 2025-01-31 --export
+
+# Export multiple agents (comma-separated)
+token-stats -b hermes,claude-code --export
+
+# Export all installed agents
+token-stats --all --export
 ```
 
 Flow: shows stats → prompts for directory → prompts for JSON or CSV.
+
+**Single agent export shows per-model breakdown + a "Total" row when multiple models exist:**
+```text
+📊 Hermes — Export (2026-05-18)
+════════════════════════════════════════════════════
+  deepseek-v4-flash
+    context          178.4K /   1.05M (17.0%)
+    input tokens     115.1K
+    output tokens     63.3K
+    cache tokens     18.10M
+    calls            192 (today: 24)
+    ─────────────────────────────────────
+    total tokens     178.4K
+    total + cache    18.28M
+
+  claude-sonnet-4
+    context           85.5K /  200.0K (42.8%)
+    input tokens      52.2K
+    output tokens     33.3K
+    cache tokens      2.00M
+    calls             10 (today: 24)
+    ─────────────────────────────────────
+    total tokens      85.5K
+    total + cache     2.09M
+
+  ──────────────────────────────────────────    ← auto-added for multi-model
+  Total
+    input tokens     167.3K
+    output tokens     96.6K
+    cache tokens     20.10M
+    calls            202
+    ─────────────────────────────────────
+    total tokens     263.9K
+    total + cache    20.36M
+```
+
+**Multi-agent export (`--all --export` or `-b a,b --export`):**
+Each agent is shown separately, with a grand total across all agents.
+JSON uses an `"agents": [...]` structure; CSV adds an `Agent` column.
 
 Supports all 3 OS path formats:
 - macOS/Linux: `~/Desktop`, `/tmp/data`
@@ -261,14 +309,24 @@ token-stats -b claude-code --watch 2   # 2-second interval
 
 Polls every N seconds (default 5). Ctrl+C to stop and see a summary with final state + total delta.
 
-Example output:
+Example output (single model):
 ```text
 ── [05:30:45] +347 tokens (+1 calls) ──
   deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input +333/82.6K tokens | output +14/36.6K tokens | cache +103.0K/7.93M tokens | calls +1/115
-  📅 today  input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22
+  deepseek-v4-flash | input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22       ← today totals
 
-── [05:30:50] no change ──
-  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input 82.6K tokens | output 36.6K tokens | cache 7.93M tokens | calls 115
+── [05:30:50] no change ──                                     ← single line only when nothing changed
+```
+
+Example output (multiple models, per-model today totals + total row):
+```text
+── [05:30:55] +1.2K tokens (+2 calls) ──
+  deepseek-v4-flash | context 178.4K/1.05M (17.0% ✅) | input +968/115.1K tokens | output +232/63.3K tokens | ...
+  claude-sonnet-4    | context 85.5K/200K (42.8%) | input +87/52.2K tokens | output +40/33.2K tokens | ...
+  deepseek-v4-flash | input 481.2K tokens | output 120.2K tokens | total 601.4K tokens | cache 8.81M tokens | calls 24
+  claude-sonnet-4   | input 200.1K tokens | output 50.1K tokens | total 250.2K tokens | cache 2.01M tokens | calls 11
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  Total             | input 681.3K tokens | output 170.3K tokens | total 851.6K tokens | cache 10.82M tokens | calls 35
 ```
 
 **What live monitoring tells you:**
@@ -346,6 +404,8 @@ All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, 
 | `token-stats -b <name> --yesterday --export` | Export yesterday's stats |
 | `token-stats -b <name> --last-7d --export` | Export last 7 days |
 | `token-stats -b <name> --from X --to Y --export` | Export custom date range |
+| `token-stats -b <name1>,<name2> --export` | Export multiple agents (comma-separated) |
+| `token-stats --all --export` | Export all installed agents |
 
 ### Live Monitoring
 
@@ -360,6 +420,8 @@ All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, 
 | Command | Description |
 |---------|-------------|
 | `token-stats --all` | Show stats for ALL installed agents |
+| `token-stats -b <name1>,<name2>` | Show multiple agents at once (comma-separated) |
+| `token-stats --all --export` | Export stats for all agents |
 | `token-stats --list-backends` | List installed agents (check mark or cross) |
 
 ### Setup & Maintenance

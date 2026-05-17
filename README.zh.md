@@ -152,6 +152,9 @@ token-stats -b claude-code
 token-stats -b codex
 token-stats -b openclaw
 
+# 同时查看多个 Agent（逗号分隔）
+token-stats -b hermes,claude-code
+
 # 查看本机所有 Agent
 token-stats --all
 
@@ -256,28 +259,54 @@ token-stats -b hermes --last-7d --export
 
 # 导出指定时间段
 token-stats -b hermes --from 2026-01-01 --to 2026-05-18 --export
-token-stats -b claude-code --from 2026-01-01 --to 2026-05-18 --export
+
+# 导出多个 Agent（逗号分隔）
+token-stats -b hermes,claude-code --export
+
+# 导出本机所有 Agent
+token-stats --all --export
 ```
 
  流程：先显示格式化汇总 → 请输入导出目录路径 → 选择 JSON 还是 CSV。
 
-  导出汇总示例：
-  ```text
-  📊 Hermes — 导出 (2026-05-18)
-  ════════════════════════════════════════════════════
-    deepseek-v4-flash
-      上下文          119.2K / 1.05M (11.4%)
-      输入 tokens      82.6K
-      输出 tokens      36.6K
-      缓存 tokens      7.93M
-      调用次数        115 次 (今日: 42 次)
-      ─────────────────────────────────────
-      总计 tokens     119.2K
-      总计 + 缓存     8.05M
-  ```
+ **单 Agent 导出包含每个模型的明细 + 合计行（多模型时）：**
+ ```text
+ 📊 Hermes — 导出 (2026-05-18)
+ ════════════════════════════════════════════════════
+   deepseek-v4-flash
+     上下文          178.4K /   1.05M (17.0%)
+     输入 tokens     115.1K
+     输出 tokens      63.3K
+     缓存 tokens     18.10M
+     调用次数        192 次 (今日: 24 次)
+     ─────────────────────────────────────
+     总计 tokens     178.4K
+     总计 + 缓存     18.28M
 
-  JSON 导出包含：模型、输入/输出/缓存 tokens、调用次数、今日总调用、总计 tokens、总计+缓存。
-  CSV 导出包含相同字段。
+   claude-sonnet-4
+     上下文           85.5K /  200.0K (42.8%)
+     输入 tokens      52.2K
+     输出 tokens      33.3K
+     缓存 tokens      2.00M
+     调用次数         10 次 (今日: 24 次)
+     ─────────────────────────────────────
+     总计 tokens      85.5K
+     总计 + 缓存      2.09M
+
+   ──────────────────────────────────────────    ← 多模型时自动显示合计
+   合计
+     输入 tokens     167.3K
+     输出 tokens      96.6K
+     缓存 tokens     20.10M
+     调用次数        202 次
+     ─────────────────────────────────────
+     总计 tokens     263.9K
+     总计 + 缓存     20.36M
+ ```
+
+ **多 Agent 导出（`--all --export` 或 `-b a,b --export`）：**
+ 每个 Agent 独立展示，末尾汇总全部 Agent 总计。
+ JSON 输出使用 `"agents": [...]` 结构，CSV 增加 `Agent` 列区分。
 
   支持三大操作系统路径：
 - macOS/Linux: `~/Desktop`, `/tmp/data`
@@ -296,14 +325,24 @@ token-stats -b claude-code --watch 2   # 2 秒刷新一次
 
 每 N 秒自动刷新（默认 5 秒），Ctrl+C 停止后输出汇总表和监控期间总增量。
 
-输出示例：
+输出示例（单模型）：
 ```text
 ── [05:30:45] +347 tokens (+1 调用) ──
   deepseek-v4-flash | 上下文 119.2K/1.05M (11.4% ✅) | 输入 +333/82.6K tokens | 输出 +14/36.6K tokens | 缓存 +103.0K/7.93M tokens | 调用 +1/115
-  📅 今日  输入 480.0K tokens | 输出 120.0K tokens | 总计 600.0K tokens | 缓存 8.50M tokens | 调用 22 次
+  deepseek-v4-flash | 输入 480.0K tokens | 输出 120.0K tokens | 总计 600.0K tokens | 缓存 8.50M tokens | 调用 22 次       ← 今日累计
 
-── [05:30:50] 无变化 ──
-  deepseek-v4-flash | 上下文 119.2K/1.05M (11.4% ✅) | 输入 82.6K tokens | 输出 36.6K tokens | 缓存 7.93M tokens | 调用 115
+── [05:30:50] 无变化 ──                                    ← 无变化时只一行，不显示模型行
+```
+
+输出示例（多模型，每模型一行今日数据 + 合计行）：
+```text
+── [05:30:55] +1.2K tokens (+2 调用) ──
+  deepseek-v4-flash | 上下文 178.4K/1.05M (17.0% ✅) | 输入 +968/115.1K tokens | 输出 +232/63.3K tokens | ...
+  claude-sonnet-4    | 上下文 85.5K/200K (42.8%) | 输入 +87/52.2K tokens | 输出 +40/33.2K tokens | ...
+  deepseek-v4-flash | 输入 481.2K tokens | 输出 120.2K tokens | 总计 601.4K tokens | 缓存 8.81M tokens | 调用 24 次
+  claude-sonnet-4   | 输入 200.1K tokens | 输出 50.1K tokens | 总计 250.2K tokens | 缓存 2.01M tokens | 调用 11 次
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  合计              | 输入 681.3K tokens | 输出 170.3K tokens | 总计 851.6K tokens | 缓存 10.82M tokens | 调用 35 次
 ```
 
 **实时监控能告诉你：**
@@ -383,6 +422,8 @@ token-stats --list-backends
 | `token-stats -b <name> --yesterday --export` | 导出昨日统计 |
 | `token-stats -b <name> --last-7d --export` | 导出近 7 天统计 |
 | `token-stats -b <name> --from 2026-01-01 --to 2026-05-18 --export` | 导出指定时间段统计 |
+| `token-stats -b <name1>,<name2> --export` | 导出多个 Agent（逗号分隔） |
+| `token-stats --all --export` | 导出本机所有 Agent |
 
 ### 实时监控
 
@@ -397,6 +438,8 @@ token-stats --list-backends
 | 命令 | 说明 |
 |------|------|
 | `token-stats --all` | 查看本机所有 Agent 统计 |
+| `token-stats -b <name1>,<name2>` | 同时查看多个 Agent（逗号分隔） |
+| `token-stats --all --export` | 导出所有 Agent 统计 |
 | `token-stats --list-backends` | 列出已安装的 Agent |
 
 ### 安装与维护
