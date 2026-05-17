@@ -223,6 +223,19 @@ def parse_time_label(label: str) -> tuple:
     return parse_date(s)
 
 
+def _skip_model(pm: dict) -> bool:
+    """过滤掉 unknown 且无数据的模型条目（输出/导出/监控通用）。"""
+    model = (pm.get("model", "") or "").strip()
+    if not model or model == "unknown":
+        inp = pm.get("input", 0) or 0
+        out = pm.get("output", 0) or 0
+        cache = pm.get("cache", 0) or 0
+        calls = pm.get("calls", 0) or 0
+        if inp == 0 and out == 0 and cache == 0 and calls == 0:
+            return True
+    return False
+
+
 def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: int,
                       context_window: int = None, session_count: int = None,
                       extra: str = None) -> str:
@@ -1180,9 +1193,10 @@ def export_interactive(data: AgentData, agent: BaseAgent):
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
 
-        # 获取今日总调用次数
+        # 获取今日总调用次数（全局 + 按模型）
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         today_calls = 0
+        today_calls_by_model = {}
         try:
             today_data = agent.collect(from_ts=today_start)
             if today_data.stats:
@@ -1190,6 +1204,11 @@ def export_interactive(data: AgentData, agent: BaseAgent):
                 # Fallback: sum from per_model
                 if today_calls == 0 and today_data.per_model:
                     today_calls = sum(pm.get("calls", 0) for pm in today_data.per_model)
+            if today_data and today_data.per_model:
+                for pm in today_data.per_model:
+                    m = (pm.get("model", "") or "").strip()
+                    if m:
+                        today_calls_by_model[m] = pm.get("calls", 0)
         except Exception:
             today_calls = 0
 
@@ -1197,7 +1216,8 @@ def export_interactive(data: AgentData, agent: BaseAgent):
         print()
         print(f"📊 {data.display_name} — 导出 ({date_str})")
         print("═" * 52)
-        for pm in (data.per_model or []):
+        filtered_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+        for pm in filtered_models:
             m = pm.get("model", "unknown")
             inp = pm.get("input", 0)
             out = pm.get("output", 0)
@@ -1213,17 +1233,17 @@ def export_interactive(data: AgentData, agent: BaseAgent):
             print(f"    输入 tokens     {fmt_num(inp):>8}")
             print(f"    输出 tokens     {fmt_num(out):>8}")
             print(f"    缓存 tokens     {fmt_num(cache):>8}")
-            print(f"    调用次数        {calls} 次 (今日: {today_calls} 次)")
+            print(f"    调用次数        {calls} 次 (今日: {today_calls_by_model.get(m, 0)} 次)")
             print(f"    ─────────────────────────────────────")
             print(f"    总计 tokens     {fmt_num(total_tok):>8}")
             print(f"    总计 + 缓存     {fmt_num(total_w_cache):>8}")
 
         # ── 合计（多模型时显示） ──
-        if data.per_model and len(data.per_model) > 1:
-            ti = sum(pm.get("input", 0) for pm in data.per_model)
-            to = sum(pm.get("output", 0) for pm in data.per_model)
-            tc = sum(pm.get("cache", 0) for pm in data.per_model)
-            tca = sum(pm.get("calls", 0) for pm in data.per_model)
+        if filtered_models and len(filtered_models) > 1:
+            ti = sum(pm.get("input", 0) for pm in filtered_models)
+            to = sum(pm.get("output", 0) for pm in filtered_models)
+            tc = sum(pm.get("cache", 0) for pm in filtered_models)
+            tca = sum(pm.get("calls", 0) for pm in filtered_models)
             tt = ti + to
             print(f"  {'─' * 42}")
             print(f"  合计")
@@ -1282,19 +1302,20 @@ def export_interactive(data: AgentData, agent: BaseAgent):
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
                     "calls": pm.get("calls", 0),
+                    "today_calls": today_calls_by_model.get(pm.get("model", ""), 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
                     "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
-                } for pm in (data.per_model or [])],
+                } for pm in filtered_models],
                 "summary": (
                     {
-                        "total_input_tokens": sum(pm.get("input", 0) for pm in data.per_model),
-                        "total_output_tokens": sum(pm.get("output", 0) for pm in data.per_model),
-                        "total_cache_tokens": sum(pm.get("cache", 0) for pm in data.per_model),
-                        "total_calls": sum(pm.get("calls", 0) for pm in data.per_model),
-                        "total_tokens": sum(pm.get("input", 0) + pm.get("output", 0) for pm in data.per_model),
-                        "total_with_cache": sum(pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0) for pm in data.per_model),
+                        "total_input_tokens": sum(pm.get("input", 0) for pm in filtered_models),
+                        "total_output_tokens": sum(pm.get("output", 0) for pm in filtered_models),
+                        "total_cache_tokens": sum(pm.get("cache", 0) for pm in filtered_models),
+                        "total_calls": sum(pm.get("calls", 0) for pm in filtered_models),
+                        "total_tokens": sum(pm.get("input", 0) + pm.get("output", 0) for pm in filtered_models),
+                        "total_with_cache": sum(pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0) for pm in filtered_models),
                     }
-                    if data.per_model and len(data.per_model) > 1
+                    if filtered_models and len(filtered_models) > 1
                     else None
                 ),
             }
@@ -1305,22 +1326,22 @@ def export_interactive(data: AgentData, agent: BaseAgent):
                 writer = csv.writer(f)
                 writer.writerow(["模型", "输入tokens", "输出tokens", "缓存tokens",
                                  "调用次数", "今日总调用", "总计tokens", "总计+缓存"])
-                for pm in (data.per_model or []):
+                for pm in filtered_models:
                     inp = pm.get("input", 0)
                     out = pm.get("output", 0)
                     cache = pm.get("cache", 0)
                     writer.writerow([
                         pm.get("model", "unknown"),
                         inp, out, cache,
-                        pm.get("calls", 0), today_calls,
+                        pm.get("calls", 0), today_calls_by_model.get(pm.get("model", ""), 0),
                         inp + out, inp + out + cache,
                     ])
 
-                if data.per_model and len(data.per_model) > 1:
-                    ti = sum(pm.get("input", 0) for pm in data.per_model)
-                    to = sum(pm.get("output", 0) for pm in data.per_model)
-                    tc = sum(pm.get("cache", 0) for pm in data.per_model)
-                    tca = sum(pm.get("calls", 0) for pm in data.per_model)
+                if filtered_models and len(filtered_models) > 1:
+                    ti = sum(pm.get("input", 0) for pm in filtered_models)
+                    to = sum(pm.get("output", 0) for pm in filtered_models)
+                    tc = sum(pm.get("cache", 0) for pm in filtered_models)
+                    tca = sum(pm.get("calls", 0) for pm in filtered_models)
                     writer.writerow(["合计", ti, to, tc, tca, today_calls,
                                     ti + to, ti + to + tc])
 
@@ -1340,6 +1361,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
         agent_data_list = []
         for agent, data in results:
             today_calls = 0
+            today_calls_by_model = {}
             try:
                 today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
                 today_data = agent.collect(from_ts=today_start)
@@ -1347,18 +1369,24 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                     today_calls = today_data.stats.get("api_calls", 0) or 0
                     if today_calls == 0 and today_data.per_model:
                         today_calls = sum(pm.get("calls", 0) for pm in today_data.per_model)
+                if today_data and today_data.per_model:
+                    for pm in today_data.per_model:
+                        m = (pm.get("model", "") or "").strip()
+                        if m:
+                            today_calls_by_model[m] = pm.get("calls", 0)
             except Exception:
                 pass
-            agent_data_list.append((agent, data, today_calls))
+            agent_data_list.append((agent, data, today_calls, today_calls_by_model))
 
         # ── 显示格式化汇总 ──
         print()
         print(f"📊 多 Agent 导出 ({date_str})")
         print("═" * 52)
         grand_ti = grand_to = grand_tc = grand_tca = 0
-        for agent, data, today_calls in agent_data_list:
+        for agent, data, today_calls, today_calls_by_model in agent_data_list:
             print(f"\n  🤖 {agent.display_name()}")
-            for pm in (data.per_model or []):
+            agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+            for pm in agent_models:
                 m = pm.get("model", "unknown")
                 inp = pm.get("input", 0)
                 out = pm.get("output", 0)
@@ -1373,17 +1401,17 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 print(f"      输入 tokens     {fmt_num(inp):>8}")
                 print(f"      输出 tokens     {fmt_num(out):>8}")
                 print(f"      缓存 tokens     {fmt_num(cache):>8}")
-                print(f"      调用次数        {calls} 次 (今日: {today_calls} 次)")
+                print(f"      调用次数        {calls} 次 (今日: {today_calls_by_model.get(m, 0)} 次)")
                 print(f"      ─────────────────────────────────────")
                 print(f"      总计 tokens     {fmt_num(total_tok):>8}")
                 print(f"      总计 + 缓存     {fmt_num(total_w_cache):>8}")
 
             # Agent 内合计
-            if data.per_model and len(data.per_model) > 1:
-                ti = sum(pm.get("input", 0) for pm in data.per_model)
-                to = sum(pm.get("output", 0) for pm in data.per_model)
-                tc = sum(pm.get("cache", 0) for pm in data.per_model)
-                tca = sum(pm.get("calls", 0) for pm in data.per_model)
+            if agent_models and len(agent_models) > 1:
+                ti = sum(pm.get("input", 0) for pm in agent_models)
+                to = sum(pm.get("output", 0) for pm in agent_models)
+                tc = sum(pm.get("cache", 0) for pm in agent_models)
+                tca = sum(pm.get("calls", 0) for pm in agent_models)
                 tt = ti + to
                 print(f"    {'─' * 42}")
                 print(f"    合计")
@@ -1396,7 +1424,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 print(f"      总计 + 缓存     {fmt_num(tt + tc):>8}")
                 grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
             else:
-                pm = data.per_model[0] if data.per_model else {}
+                pm = agent_models[0] if agent_models else {}
                 grand_ti += pm.get("input", 0)
                 grand_to += pm.get("output", 0)
                 grand_tc += pm.get("cache", 0)
@@ -1443,36 +1471,38 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
 
         # Step 3: 写文件
         timestamp = now.strftime("%Y%m%d_%H%M%S")
-        agent_names = "+".join(agent.name() for agent, _, _ in agent_data_list)
+        agent_names = "+".join(agent.name() for agent, _, _, _ in agent_data_list)
         filename = f"token-stats_{agent_names}_{timestamp}.{fmt}"
         filepath = os.path.join(dir_path, filename)
 
         if fmt == "json":
             agents_json = []
-            for agent, data, today_calls in agent_data_list:
+            for agent, data, today_calls, today_calls_by_model in agent_data_list:
+                agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
                 per_model = [{
                     "model": pm.get("model", "unknown"),
                     "input_tokens": pm.get("input", 0),
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
                     "calls": pm.get("calls", 0),
+                    "today_calls": today_calls_by_model.get(pm.get("model", ""), 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
                     "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
-                } for pm in (data.per_model or [])]
+                } for pm in agent_models]
                 entry = {
                     "agent": agent.name(),
                     "agent_display": agent.display_name(),
                     "today_calls": today_calls,
                     "per_model": per_model,
                 }
-                if data.per_model and len(data.per_model) > 1:
+                if agent_models and len(agent_models) > 1:
                     entry["summary"] = {
-                        "total_input_tokens": sum(pm.get("input", 0) for pm in data.per_model),
-                        "total_output_tokens": sum(pm.get("output", 0) for pm in data.per_model),
-                        "total_cache_tokens": sum(pm.get("cache", 0) for pm in data.per_model),
-                        "total_calls": sum(pm.get("calls", 0) for pm in data.per_model),
-                        "total_tokens": sum(pm.get("input", 0) + pm.get("output", 0) for pm in data.per_model),
-                        "total_with_cache": sum(pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0) for pm in data.per_model),
+                        "total_input_tokens": sum(pm.get("input", 0) for pm in agent_models),
+                        "total_output_tokens": sum(pm.get("output", 0) for pm in agent_models),
+                        "total_cache_tokens": sum(pm.get("cache", 0) for pm in agent_models),
+                        "total_calls": sum(pm.get("calls", 0) for pm in agent_models),
+                        "total_tokens": sum(pm.get("input", 0) + pm.get("output", 0) for pm in agent_models),
+                        "total_with_cache": sum(pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0) for pm in agent_models),
                     }
                 agents_json.append(entry)
 
@@ -1499,22 +1529,23 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 writer = csv.writer(f)
                 writer.writerow(["Agent", "模型", "输入tokens", "输出tokens", "缓存tokens",
                                 "调用次数", "今日总调用", "总计tokens", "总计+缓存"])
-                for agent, data, today_calls in agent_data_list:
-                    for pm in (data.per_model or []):
+                for agent, data, today_calls, today_calls_by_model in agent_data_list:
+                    agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+                    for pm in agent_models:
                         inp = pm.get("input", 0)
                         out = pm.get("output", 0)
                         cache = pm.get("cache", 0)
                         writer.writerow([
                             agent.name(), pm.get("model", "unknown"),
                             inp, out, cache,
-                            pm.get("calls", 0), today_calls,
+                            pm.get("calls", 0), today_calls_by_model.get(pm.get("model", ""), 0),
                             inp + out, inp + out + cache,
                         ])
-                    if data.per_model and len(data.per_model) > 1:
-                        ti = sum(pm.get("input", 0) for pm in data.per_model)
-                        to = sum(pm.get("output", 0) for pm in data.per_model)
-                        tc = sum(pm.get("cache", 0) for pm in data.per_model)
-                        tca = sum(pm.get("calls", 0) for pm in data.per_model)
+                    if agent_models and len(agent_models) > 1:
+                        ti = sum(pm.get("input", 0) for pm in agent_models)
+                        to = sum(pm.get("output", 0) for pm in agent_models)
+                        tc = sum(pm.get("cache", 0) for pm in agent_models)
+                        tca = sum(pm.get("calls", 0) for pm in agent_models)
                         writer.writerow([agent.name(), "合计", ti, to, tc, tca, today_calls,
                                        ti + to, ti + to + tc])
                 if len(agent_data_list) > 1:
