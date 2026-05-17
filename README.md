@@ -261,9 +261,19 @@ token-stats -b claude-code --watch 2   # 2-second interval
 
 Polls every N seconds (default 5). Ctrl+C to stop and see a summary with final state + total delta.
 
+Example output:
+```text
+── [05:30:45] +347 tokens (+1 calls) ──
+  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input +333/82.6K tokens | output +14/36.6K tokens | cache +103.0K/7.93M tokens | calls +1/115
+
+── [05:30:50] no change ──
+  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input 82.6K tokens | output 36.6K tokens | cache 7.93M tokens | calls 115
+```
+
 **What live monitoring tells you:**
-- Current context window occupancy (`context 120.0K/1.05M (11.4% ✅)`) — how full is your session?
-- Actual tokens burned per round (delta display)
+- Current context window occupancy (`context 119.2K/1.05M (11.4% ✅)`) — how full is your session?
+- Per-round **input/output/cache** delta and cumulative
+- **Model calls: delta / window total**
 - Whether the context window is nearly full (>90% 🚨), before the model silently drops older messages
 - Summary of total consumption during the monitoring session
 

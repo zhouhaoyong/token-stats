@@ -251,6 +251,8 @@ class BaseAgent(ABC):
             return not stop_event.wait(timeout=seconds)
 
         watch_start = time.time()
+        # 今日起始时间戳，用于 📅 今日合计查询
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         print(f"\n📡 实时监控 [{self.display_name()}] — 每 {interval} 秒刷新 (Ctrl+C 停止)\n")
 
         # ── 首次基线 ──
@@ -279,12 +281,17 @@ class BaseAgent(ABC):
         has_data = False
         for mn, mv in bl_models.items():
             cw = detect_context(mn)
-            line = format_model_line(mn, mv["input"], mv["output"],
-                                     mv.get("cache", 0), mv.get("calls", 0),
-                                     context_window=cw)
-            if line:
-                print(line)
-                has_data = True
+            total = mv["input"] + mv["output"]
+            pct = round(total / cw * 100, 1) if cw else 0
+            ctx_str = f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})"
+            parts = [ctx_str,
+                     f"输入 {fmt_num(mv['input'])} tokens",
+                     f"输出 {fmt_num(mv['output'])} tokens"]
+            if mv.get("cache", 0):
+                parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
+            parts.append(f"调用 {mv['calls']}")
+            print(f"  {mn} | {' | '.join(parts)}")
+            has_data = True
         if not has_data:
             print("  (暂无数据，等待会话开始...)")
         print()
@@ -368,14 +375,16 @@ class BaseAgent(ABC):
                 parts = [ctx_str]
 
                 if has_delta:
-                    parts.append(f"tokens +{fmt_num(d_tok)}/累计 {fmt_num(total)}")
+                    parts.append(f"输入 +{fmt_num(d_in)}/{fmt_num(mv['input'])} tokens")
+                    parts.append(f"输出 +{fmt_num(d_out)}/{fmt_num(mv['output'])} tokens")
                     if d_cache or mv.get("cache", 0):
-                        parts.append(f"缓存 +{fmt_num(d_cache)}/累计 {fmt_num(mv.get('cache', 0))}")
-                    parts.append(f"调用 +{d_calls}/窗口累计 {mv['calls']}")
+                        parts.append(f"缓存 +{fmt_num(d_cache)}/{fmt_num(mv.get('cache', 0))} tokens")
+                    parts.append(f"调用 +{d_calls}/{mv['calls']}")
                 else:
-                    parts.append(f"tokens {fmt_num(total)}")
+                    parts.append(f"输入 {fmt_num(mv['input'])} tokens")
+                    parts.append(f"输出 {fmt_num(mv['output'])} tokens")
                     if mv.get("cache", 0):
-                        parts.append(f"缓存 {fmt_num(mv['cache'])}")
+                        parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
                     parts.append(f"调用 {mv['calls']}")
 
                 print(f"  {mn} | {' | '.join(parts)}")
@@ -383,6 +392,31 @@ class BaseAgent(ABC):
                 # 更新基线
                 if has_delta:
                     bl_models[mn] = mv
+
+            # 📅 今日合计（每次有变化时刷新）
+            if any_delta:
+                try:
+                    today_data = self.collect(from_ts=today_start)
+                    td_in = td_out = td_cache = td_calls = 0
+                    if today_data.per_model:
+                        for pm in today_data.per_model:
+                            td_in += pm.get("input", 0)
+                            td_out += pm.get("output", 0)
+                            td_cache += pm.get("cache", 0)
+                            td_calls += pm.get("calls", 0)
+                    elif today_data.stats:
+                        td_in = today_data.stats.get("input_tokens", 0)
+                        td_out = today_data.stats.get("output_tokens", 0)
+                        td_cache = today_data.stats.get("cache_read", 0)
+                        td_calls = today_data.stats.get("api_calls", 0)
+                    parts = [f"📅 今日  输入 {fmt_num(td_in)} tokens",
+                             f"输出 {fmt_num(td_out)} tokens"]
+                    if td_cache:
+                        parts.append(f"缓存 {fmt_num(td_cache)} tokens")
+                    parts.append(f"调用 {td_calls} 次")
+                    print(f"  {' | '.join(parts)}")
+                except Exception:
+                    pass
 
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
@@ -400,11 +434,15 @@ class BaseAgent(ABC):
             print("  最终状态:")
             for mn, mv in sorted(bl_models.items()):
                 cw = detect_context(mn)
-                line = format_model_line(mn, mv["input"], mv["output"],
-                                         mv.get("cache", 0), mv.get("calls", 0),
-                                         context_window=cw)
-                if line:
-                    print(line)
+                total = mv["input"] + mv["output"]
+                pct = round(total / cw * 100, 1) if cw else 0
+                ctx_str = f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})"
+                parts = [ctx_str, f"输入 {fmt_num(mv['input'])} tokens",
+                         f"输出 {fmt_num(mv['output'])} tokens"]
+                if mv.get("cache", 0):
+                    parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
+                parts.append(f"调用 {mv['calls']}")
+                print(f"  {mn} | {' | '.join(parts)}")
 
             # 总增量（最新累计 - 初始基线）
             total_d_tok = total_d_cache = total_d_calls = 0
@@ -420,10 +458,11 @@ class BaseAgent(ABC):
                 total_d_cache += d_cache
                 total_d_calls += d_calls
                 if d_tok > 0 or d_cache > 0 or d_calls > 0:
-                    parts = [f"tokens +{fmt_num(d_tok)}"]
+                    parts = [f"输入 +{fmt_num(d_in)} tokens",
+                             f"输出 +{fmt_num(d_out)} tokens"]
                     if d_cache:
-                        parts.append(f"缓存 +{fmt_num(d_cache)}")
-                    delta_lines.append(f"  {mn} | {' | '.join(parts)} | +{d_calls} calls")
+                        parts.append(f"缓存 +{fmt_num(d_cache)} tokens")
+                    delta_lines.append(f"  {mn} | {' | '.join(parts)} | +{d_calls} 调用")
 
             if delta_lines:
                 print(f"\n  监控期间增量 (总 tokens +{fmt_num(total_d_tok)}):")
@@ -1058,6 +1097,48 @@ def show_menu(installed: list[type[BaseAgent]]) -> BaseAgent:
 def export_interactive(data: AgentData, agent: BaseAgent):
     """交互式导出统计"""
     try:
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+
+        # 获取今日总调用次数
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        today_calls = 0
+        try:
+            today_data = agent.collect(from_ts=today_start)
+            if today_data.stats:
+                today_calls = today_data.stats.get("api_calls", 0) or 0
+                # Fallback: sum from per_model
+                if today_calls == 0 and today_data.per_model:
+                    today_calls = sum(pm.get("calls", 0) for pm in today_data.per_model)
+        except Exception:
+            today_calls = 0
+
+        # ── 显示格式化汇总 ──
+        print()
+        print(f"📊 {data.display_name} — 导出 ({date_str})")
+        print("═" * 52)
+        for pm in (data.per_model or []):
+            m = pm.get("model", "unknown")
+            inp = pm.get("input", 0)
+            out = pm.get("output", 0)
+            cache = pm.get("cache", 0)
+            calls = pm.get("calls", 0)
+            total_tok = inp + out
+            total_w_cache = total_tok + cache
+            cw = detect_context(m)
+            pct = round(total_tok / cw * 100, 1) if cw else 0
+
+            print(f"  {m}")
+            print(f"    上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
+            print(f"    输入 tokens     {fmt_num(inp):>8}")
+            print(f"    输出 tokens     {fmt_num(out):>8}")
+            print(f"    缓存 tokens     {fmt_num(cache):>8}")
+            print(f"    调用次数        {calls} 次 (今日: {today_calls} 次)")
+            print(f"    ─────────────────────────────────────")
+            print(f"    总计 tokens     {fmt_num(total_tok):>8}")
+            print(f"    总计 + 缓存     {fmt_num(total_w_cache):>8}")
+        print()
+
         # Step 1: 输入目录
         while True:
             dir_input = input("请输入导出目录路径: ").strip()
@@ -1085,7 +1166,7 @@ def export_interactive(data: AgentData, agent: BaseAgent):
             fmt = "json"
 
         # Step 3: 写文件
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = now.strftime("%Y%m%d_%H%M%S")
         filename = f"token-stats_{agent.name()}_{timestamp}.{fmt}"
         filepath = os.path.join(dir_path, filename)
 
@@ -1095,23 +1176,35 @@ def export_interactive(data: AgentData, agent: BaseAgent):
                 "version": VERSION,
                 "agent": agent.name(),
                 "agent_display": agent.display_name(),
-                "exported_at": datetime.now().isoformat(),
-                "stats": data.stats,
-                "per_model": data.per_model or [],
+                "export_date": date_str,
+                "exported_at": now.isoformat(),
+                "today_calls": today_calls,
+                "per_model": [{
+                    "model": pm.get("model", "unknown"),
+                    "input_tokens": pm.get("input", 0),
+                    "output_tokens": pm.get("output", 0),
+                    "cache_tokens": pm.get("cache", 0),
+                    "calls": pm.get("calls", 0),
+                    "total_tokens": pm.get("input", 0) + pm.get("output", 0),
+                    "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
+                } for pm in (data.per_model or [])],
             }
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
         else:
             with open(filepath, "w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["模型", "输入tokens", "输出tokens", "缓存tokens", "调用次数"])
+                writer.writerow(["模型", "输入tokens", "输出tokens", "缓存tokens",
+                                 "调用次数", "今日总调用", "总计tokens", "总计+缓存"])
                 for pm in (data.per_model or []):
+                    inp = pm.get("input", 0)
+                    out = pm.get("output", 0)
+                    cache = pm.get("cache", 0)
                     writer.writerow([
                         pm.get("model", "unknown"),
-                        pm.get("input", 0),
-                        pm.get("output", 0),
-                        pm.get("cache", 0),
-                        pm.get("calls", 0),
+                        inp, out, cache,
+                        pm.get("calls", 0), today_calls,
+                        inp + out, inp + out + cache,
                     ])
 
         print(f"✅ 已导出到: {filepath}")
