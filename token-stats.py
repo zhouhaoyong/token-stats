@@ -586,7 +586,8 @@ class HermesAgent(BaseAgent):
             where = []
             params = []
             if from_ts is not None:
-                where.append("started_at >= ?")
+                where.append("(started_at >= ? OR ended_at IS NULL OR (ended_at IS NOT NULL AND ended_at >= ?))")
+                params.append(from_ts)
                 params.append(from_ts)
             if to_ts is not None:
                 where.append("started_at <= ?")
@@ -729,6 +730,23 @@ class ClaudeCodeAgent(BaseAgent):
     def detect() -> bool:
         return os.path.isdir(os.path.join(CLAUDE_DIR, "projects"))
 
+    @staticmethod
+    def _ts_in_range(ts_str: str, from_ts: float = None, to_ts: float = None) -> bool:
+        """Check if an ISO timestamp string falls within the given Unix time range."""
+        if from_ts is None and to_ts is None:
+            return True
+        try:
+            # Parse ISO 8601 timestamp (e.g. '2026-05-14T18:07:28.252Z')
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            msg_ts = dt.timestamp()
+            if from_ts is not None and msg_ts < from_ts:
+                return False
+            if to_ts is not None and msg_ts > to_ts:
+                return False
+            return True
+        except (ValueError, TypeError):
+            return True  # can't parse → include to be safe
+
     def _find_sessions(self, from_ts: float = None, to_ts: float = None):
         projects_dir = os.path.join(CLAUDE_DIR, "projects")
         if not os.path.isdir(projects_dir):
@@ -741,16 +759,11 @@ class ClaudeCodeAgent(BaseAgent):
             for fname in os.listdir(proj_dir):
                 if fname.endswith(".jsonl") and not fname.endswith(".trajectory.jsonl"):
                     fpath = os.path.join(proj_dir, fname)
-                    mtime = os.path.getmtime(fpath)
-                    if from_ts is not None and mtime < from_ts:
-                        continue
-                    if to_ts is not None and mtime > to_ts:
-                        continue
                     sessions.append((proj, fname, fpath))
         return sorted(sessions, key=lambda x: os.path.getmtime(x[2]), reverse=True)
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        sessions = self._find_sessions(from_ts, to_ts)
+        sessions = self._find_sessions()
         if not sessions:
             return AgentData(
                 name="claude-code", display_name="Claude Code",
@@ -774,6 +787,8 @@ class ClaudeCodeAgent(BaseAgent):
                         except json.JSONDecodeError:
                             continue
                         if msg.get("type") == "assistant":
+                            if not self._ts_in_range(msg.get("timestamp", ""), from_ts, to_ts):
+                                continue
                             model = msg.get("message", {}).get("model") or msg.get("model", "unknown")
                             if model.startswith("<"):
                                 model = "subagent"
