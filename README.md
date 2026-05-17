@@ -1,3 +1,8 @@
+<p align="center">
+  <a href="README.md"><strong>🇬🇧 English</strong></a> ·
+  <a href="README.zh.md"><strong>🇨🇳 简体中文</strong></a>
+</p>
+
 # token-stats
 
 > 🎯 Cross-platform LLM token usage tracker for AI coding agents.

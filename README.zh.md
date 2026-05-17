@@ -1,3 +1,8 @@
+<p align="center">
+  <a href="README.md"><strong>🇬🇧 English</strong></a> ·
+  <a href="README.zh.md"><strong>🇨🇳 简体中文</strong></a>
+</p>
+
 # token-stats
 
 > 🎯 跨平台 AI 编码助手 token 消耗精确统计工具。
