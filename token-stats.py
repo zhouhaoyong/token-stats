@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 
 
 # ═══════════════════════════════════════════════════
@@ -596,18 +596,22 @@ def main():
         target = os.path.join(os.path.expanduser("~"), ".local", "bin", "token-stats")
         script_path = os.path.abspath(__file__)
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        if os.path.exists(target):
-            current = os.path.realpath(target)
-            if current == script_path:
-                print(f"✅ 软链已存在: {target} → {script_path}")
-                return
-            os.remove(target)
-        os.symlink(script_path, target)
-        print(f"✅ 已创建: {target} → {script_path}")
+
+        # 创建 shell 包装器（不是软链），这样脚本本身不需要 +x 权限
+        wrapper = (
+            "#!/bin/sh\n"
+            f'exec python3 "{script_path}" "$@"\n'
+        )
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(wrapper)
+        os.chmod(target, 0o755)  # +x
+
+        print(f"✅ 已创建全局命令: {target}")
+        print(f"   → 每次执行都调用: python3 {script_path}")
         # 检查 PATH
         bin_dir = os.path.dirname(target)
         if bin_dir not in os.environ.get("PATH", "").split(":"):
-            print(f"⚠️  {bin_dir} 不在 PATH 中，请添加:")
+            print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
             print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.zshrc")
             print(f"   source ~/.zshrc")
         return

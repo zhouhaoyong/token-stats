@@ -18,8 +18,8 @@ You have multiple AI assistants installed on your machine (Hermes, Claude Code, 
 # Step 1: Install from ClawHub
 clawhub install agent-usage-stats
 
-# Step 2: Create global command
-~/skills/agent-usage-stats/token-stats.py setup
+# Step 2: Create global command (script may lack +x, so prefix with python3)
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
 That's it. Now just type `token-stats` in your terminal.
