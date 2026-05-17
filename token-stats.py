@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 
 # ═══════════════════════════════════════════════════
