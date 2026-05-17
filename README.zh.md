@@ -627,3 +627,41 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 
 ```bash
 sqlite3 ~/.hermes/state.db "SELECT DISTINCT model FROM sessions WHERE model IS NULL OR model = ''"
+
+### API 中转站 / 代理服务
+
+> 如果你通过 **API 中转站** 访问大模型，请注意以下限制。
+
+token-stats 依赖 API 返回的 `usage` 对象来统计消耗。数据链路如下：
+
+```
+你的 Agent → 中转站 → 真实 API
+                         ↓
+           真实 API 返回 usage 对象
+                         ↓
+           中转站将响应转发给你的 Agent
+                         ↓
+           你的 Agent 写入本地存储
+                         ↓
+           token-stats 读取本地存储
+```
+
+**统计准确的条件：** 中转站将原始 API 响应 **原样透传**（含 `usage` 字段）。多数主流中转站都这样做。
+
+**统计可能不准的条件：** 中转站：
+- 移除了 `usage` 字段
+- 篡改了 token 数量（如虚增用量）
+- 替换了模型名称
+
+token-stats **只记录收到的数据**，不校验数据是否与真实 API 一致。它是**本地账本**，记的是 Agent 记下的账，不是上游 API 的结算账单。
+
+> 如果怀疑中转站数据不实，请将 token-stats 输出与中转站结算后台对比。不一致说明数据可能被修改过。
+
+---
+
+token-stats 本质上是一个**开源透明度工具**。它本身不评判中转站的好坏，而是让 token 消耗变得**可审计、可验证**：
+
+- 对**诚实中转站**：用户能自行核对，反而建立信任
+- 对**不诚实中转站**：数据差异会暴露问题
+
+无论直连还是走中转，用户都应该有权知道自己的真实消耗。token-stats 不站队，只记账。

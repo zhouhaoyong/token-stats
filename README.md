@@ -608,40 +608,40 @@ token-stats -b hermes --export
 > - To see stats on another machine, install `token-stats` there too
 > - All statistics are per-agent, not a cross-agent total
 
-### API 中转站 / 代理服务
+### API Relay / Proxy Service
 
-> 如果你通过 **API 中转站** 访问大模型，请注意以下限制。
+> If you access LLMs through an **API relay (中转站)**, note the following caveats.
 
-token-stats 依赖 API 返回的 `usage` 对象来统计消耗。数据链路如下：
+token-stats relies on the `usage` object returned by the real API. The data flow is:
 
 ```
-你的 Agent → 中转站 → 真实 API
+Your Agent → Relay → Real API
                          ↓
-           真实 API 返回 usage 对象
+           Real API returns usage object
                          ↓
-           中转站将响应转发给你的 Agent
+           Relay forwards the response to your Agent
                          ↓
-           你的 Agent 写入本地存储
+           Your Agent writes to local storage
                          ↓
-           token-stats 读取本地存储
+           token-stats reads from local storage
 ```
 
-**统计准确的条件：** 中转站将原始 API 响应 **原样透传**（含 `usage` 字段）。多数主流中转站都这样做。
+**Accurate stats require:** the relay to pass through the original API response **as-is** (including the `usage` field). Most mainstream relays do this.
 
-**统计可能不准的条件：** 中转站：
-- 移除了 `usage` 字段
-- 篡改了 token 数量（如虚增用量）
-- 替换了模型名称
+**Stats may be inaccurate if:** the relay:
+- Removes the `usage` field
+- Tampers with token counts (e.g. inflating usage)
+- Replaces model names
 
-token-stats **只记录收到的数据**，不校验数据是否与真实 API 一致。它是**本地账本**，记的是 Agent 记下的账，不是上游 API 的结算账单。
+token-stats **only records what it receives** — it does not verify data against the real API. It is a **local ledger** that records what your Agent wrote down, not the upstream API's billing invoice.
 
-> 如果怀疑中转站数据不实，请将 token-stats 输出与中转站结算后台对比。不一致说明数据可能被修改过。
+> If you suspect relay data is inaccurate, compare token-stats output with the relay's billing dashboard. Discrepancies suggest data may have been modified.
 
 ---
 
-token-stats 本质上是一个**开源透明度工具**。它本身不评判中转站的好坏，而是让 token 消耗变得**可审计、可验证**：
+token-stats is fundamentally an **open-source transparency tool**. It does not judge relay services — it makes token consumption **auditable and verifiable**:
 
-- 对**诚实中转站**：用户能自行核对，反而建立信任
-- 对**不诚实中转站**：数据差异会暴露问题
+- For **honest relays**: users can cross-check and build trust
+- For **dishonest relays**: data discrepancies expose the problem
 
-无论直连还是走中转，用户都应该有权知道自己的真实消耗。token-stats 不站队，只记账。
+Whether you connect directly or through a relay, users deserve to know their actual consumption. token-stats doesn't take sides — it just keeps the books.
