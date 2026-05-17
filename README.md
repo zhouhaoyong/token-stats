@@ -188,20 +188,23 @@ token-stats --watch
 
 效果（每 10 秒自动刷新）：
 ```
-📡 实时监控 [hermes] — 每 10 秒刷新一次 (Ctrl+C 停止)
+📡 实时监控 [hermes] — 每 5 秒刷新 (Ctrl+C 停止)
 
-  等待数据变化...
-[14:32:10] deepseek-v4-flash +4.3K tokens (1 次)
-[14:34:55] deepseek-v4-flash +2.1K tokens (1 次)
-[14:37:12] deepseek-v4-flash +8.7K tokens (2 次)
+  等待对话...
+  [14:32] 对话 1 轮 · 消耗 4.3K tokens (deepseek-v4-flash)
+        输入 3.2K / 输出 1.1K
+  [14:34] 对话 1 轮 · 消耗 2.1K tokens (deepseek-v4-flash)
+        输入 1.5K / 输出 0.6K
+  [14:37] 对话 2 轮 · 消耗 8.7K tokens (deepseek-v4-flash)
+        输入 6.2K / 输出 2.5K
 
-━━━ 本次监控会话合计 ━━━
-  deepseek-v4-flash: 4 次调用 · 15.1K tokens
+📊 本次监控汇总
+  deepseek-v4-flash: 4 轮 · 15.1K tokens
   ───────────────
-  合计: 4 次调用 · 15.1K tokens
+  总计: 4 轮 · 15.1K tokens
 ```
 
-> **小提示：** `--watch 5` 可以改成每 5 秒刷一次，刷得更快。
+> **小提示：** `--watch 10` 可以改成每 10 秒刷一次（更省资源）。
 
 ---
 

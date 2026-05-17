@@ -229,7 +229,7 @@ class BaseBackend(ABC):
         """检测本后端是否可用"""
         ...
 
-    def watch(self, interval: int = 10) -> None:
+    def watch(self, interval: int = 5) -> None:
         """实时监控模式：每 N 秒轮询一次，输出增量变化。按 Ctrl+C 停止。"""
         running = True
 
@@ -240,7 +240,7 @@ class BaseBackend(ABC):
         signal.signal(signal.SIGINT, _on_signal)
         signal.signal(signal.SIGTERM, _on_signal)
 
-        print(f"📡 实时监控 [{self.name()}] — 每 {interval} 秒刷新一次 (Ctrl+C 停止)\n")
+        print(f"📡 实时监控 [{self.name()}] — 每 {interval} 秒刷新 (Ctrl+C 停止)\n")
         time.sleep(0.5)
 
         # 第 1 步：记录初始基线
@@ -268,13 +268,15 @@ class BaseBackend(ABC):
             )
 
             if has_change:
-                now = datetime.now().strftime("%H:%M:%S")
-                parts = []
+                now = datetime.now().strftime("%H:%M")
                 for m in delta.models:
                     if m.api_calls > 0 or m.input_tokens > 0 or m.output_tokens > 0:
                         tok = m.input_tokens + m.output_tokens
-                        cache = f" · cache {fmt_num(m.cache_read)}" if m.cache_read else ""
-                        parts.append(f"{m.model} +{fmt_num(tok)} tokens ({m.api_calls} 次){cache}")
+                        inp = m.input_tokens
+                        out = m.output_tokens
+                        cache = f" · 缓存 {fmt_num(m.cache_read)}" if m.cache_read else ""
+                        print(f"  [{now}] 对话 {m.api_calls} 轮 · 消耗 {fmt_num(tok)} tokens ({m.model})")
+                        print(f"        输入 {fmt_num(inp)} / 输出 {fmt_num(out)}{cache}")
                         # 累计到 total_delta
                         existing = next((x for x in total_delta.models if x.model == m.model), None)
                         if existing:
@@ -284,26 +286,24 @@ class BaseBackend(ABC):
                             existing.cache_read += m.cache_read
                         else:
                             total_delta.models.append(m)
-                if parts:
-                    print(f"[{now}] {' | '.join(parts)}")
                     total_delta.cumulative_input += sum(m.input_tokens for m in delta.models)
                     total_delta.cumulative_output += sum(m.output_tokens for m in delta.models)
             elif first:
-                print("  等待数据变化...")
+                print("  ⏳ 等待对话...")
 
             first = False
 
         # Ctrl+C 停止后输出汇总
         if total_delta.models:
-            print(f"\n━━━ 本次监控会话合计 ━━━")
+            total_tok = total_delta.cumulative_input + total_delta.cumulative_output
+            print(f"\n📊 本次监控汇总")
             for m in total_delta.models:
                 tok = m.input_tokens + m.output_tokens
-                print(f"  {m.model}: {m.api_calls} 次调用 · {fmt_num(tok)} tokens")
-            total_tok = total_delta.cumulative_input + total_delta.cumulative_output
+                print(f"  {m.model}: {m.api_calls} 轮 · {fmt_num(tok)} tokens")
             print(f"  ───────────────")
-            print(f"  合计: {sum(m.api_calls for m in total_delta.models)} 次调用 · {fmt_num(total_tok)} tokens")
+            print(f"  总计: {sum(m.api_calls for m in total_delta.models)} 轮 · {fmt_num(total_tok)} tokens")
         else:
-            print("\n📭 监控期间未检测到数据变化")
+            print("\n📭 监控期间没有检测到对话")
 
 
 # ═══════════════════════════════════════════════════
@@ -975,8 +975,8 @@ def main():
     parser.add_argument("-b", "--backend", default="auto", help="后端: hermes/claude-code/openclaw/codex/auto")
     parser.add_argument("--recent", type=int, help="最近 N 条会话")
     parser.add_argument("--version", action="store_true", help="显示版本号")
-    parser.add_argument("--watch", nargs="?", type=int, const=10, default=None, metavar="秒",
-                        help="实时监控模式（默认每 10 秒轮询）")
+    parser.add_argument("--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
+                        help="实时监控模式（默认每 5 秒轮询）")
 
     args = parser.parse_args()
 

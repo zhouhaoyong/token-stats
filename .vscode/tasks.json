@@ -32,10 +32,10 @@
       }
     },
     {
-      "label": "📊 token-stats: 实时监控 (10s)",
+      "label": "📊 token-stats: 实时监控 (5s)",
       "type": "shell",
       "command": "token-stats --watch",
-      "detail": "每 10 秒自动检测 token 消耗变化，按 Ctrl+C 停止",
+      "detail": "每 5 秒自动检测 token 消耗变化，按 Ctrl+C 停止",
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
@@ -44,10 +44,10 @@
       "problemMatcher": []
     },
     {
-      "label": "📊 token-stats: 实时监控 (C+C, 5s)",
+      "label": "📊 token-stats: 实时监控 (10s)",
       "type": "shell",
-      "command": "token-stats --watch 5",
-      "detail": "每 5 秒快速检测（消耗略高），适合密集使用",
+      "command": "token-stats --watch 10",
+      "detail": "每 10 秒检测一次（更省资源）",
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
