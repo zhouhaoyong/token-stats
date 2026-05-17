@@ -30,12 +30,18 @@
 ## 🚀 Quick Start
 
 ```bash
-# 1. Install
-pip install token-stats
-# Or just download token-stats.py — it's a single file!
+# Option A: Install via ClawHub (recommended for OpenClaw users)
+clawhub install agent-usage-stats
+
+# Option B: Install via pip (coming soon)
+# pip install token-stats
+
+# Option C: Just download the script (zero dependencies)
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
 
 # 2. Start a task
-token-stats --save-baseline
+./token-stats.py --save-baseline
 
 # 3. Do your work with your AI agent (any model, any number of turns)
 

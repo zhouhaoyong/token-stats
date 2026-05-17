@@ -30,12 +30,15 @@
 ## 🚀 快速开始
 
 ```bash
-# 1. 安装
-pip install token-stats
-# 或者直接下载 token-stats.py — 单个文件即可运行！
+# 方式一：ClawHub 安装（OpenClaw 用户推荐）
+clawhub install agent-usage-stats
+
+# 方式二：直接下载（零依赖）
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
 
 # 2. 开始任务前记录基线
-token-stats --save-baseline
+./token-stats.py --save-baseline
 
 # 3. 正常使用你的 AI 编码助手（任意模型、任意轮次）
 
