@@ -152,6 +152,13 @@ token-stats --list-backends
 ```bash
 clawhub uninstall agent-usage-stats
 rm -f ~/.local/bin/token-stats
+
+# Clean up old aliases (if you previously set alias token-stats=...)
+grep "alias token-stats" ~/.zshrc ~/.bashrc 2>/dev/null || echo "No old aliases found"
+
+# If any found, remove them:
+sed -i '' '/alias token-stats/d' ~/.zshrc
+source ~/.zshrc
 ```
 
 ---

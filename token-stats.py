@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-VERSION = "2.0.4"
+VERSION = "2.0.5"
 
 
 # ═══════════════════════════════════════════════════
@@ -608,6 +608,24 @@ def main():
 
         print(f"✅ 已创建全局命令: {target}")
         print(f"   → 每次执行都调用: python3 {script_path}")
+
+        # 检查 shell 配置中是否有旧的 alias 冲突
+        for rc_file in ["~/.zshrc", "~/.bashrc", "~/.bash_profile"]:
+            rc_path = os.path.expanduser(rc_file)
+            if os.path.exists(rc_path):
+                with open(rc_path, encoding="utf-8") as f:
+                    content = f.read()
+                alias_lines = []
+                for i, line in enumerate(content.splitlines(), 1):
+                    if "alias token-stats" in line.strip():
+                        alias_lines.append(f"  {rc_file} 第 {i} 行: {line.strip()}")
+                if alias_lines:
+                    print()
+                    print("⚠️  检测到旧的 alias，会覆盖全局命令，建议删除：")
+                    for al in alias_lines:
+                        print(al)
+                    print("   删除方法: 手动编辑或用 sed 删除对应行，然后 source ~/.zshrc")
+
         # 检查 PATH
         bin_dir = os.path.dirname(target)
         if bin_dir not in os.environ.get("PATH", "").split(":"):

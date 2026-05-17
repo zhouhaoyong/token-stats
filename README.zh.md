@@ -185,6 +185,14 @@ clawhub uninstall agent-usage-stats
 
 # 删除全局命令
 rm -f ~/.local/bin/token-stats
+
+# 清理旧 alias（如果你之前设过 alias token-stats=...）
+# 检查现在的 shell 配置里有么有：
+grep "alias token-stats" ~/.zshrc ~/.bashrc 2>/dev/null || echo "没有发现旧的 alias"
+
+# 如果有输出对应的行，手动删除或用 sed：
+sed -i '' '/alias token-stats/d' ~/.zshrc
+source ~/.zshrc
 ```
 
 ---
