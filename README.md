@@ -265,6 +265,7 @@ Example output:
 ```text
 ── [05:30:45] +347 tokens (+1 calls) ──
   deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input +333/82.6K tokens | output +14/36.6K tokens | cache +103.0K/7.93M tokens | calls +1/115
+  📅 today  input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22
 
 ── [05:30:50] no change ──
   deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input 82.6K tokens | output 36.6K tokens | cache 7.93M tokens | calls 115

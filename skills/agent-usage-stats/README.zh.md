@@ -113,6 +113,25 @@ token-stats -b hermes
 
 如果以上三条都正常输出，说明安装完全成功 🎉
 
+## 更新
+
+```bash
+# 从 ClawHub 拉取最新版本
+clawhub update agent-usage-stats
+
+# 重新执行 setup（如果脚本有改动）
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+
+# 验证版本
+token-stats --version
+```
+
+> 💡 每次更新后建议重新执行 `setup`，确保全局命令指向最新版本。
+> 如果 `clawhub update` 后版本没变，可以加 `--force` 强制重新安装：
+> ```bash
+> clawhub install agent-usage-stats --force
+> ```
+
 > ⚠️ 如果 `~/skills/` 目录不存在，先确认 `clawhub install` 执行时当前目录在哪里。
 > ClawHub 会把技能装到 **当前目录下的 skills/ 文件夹**。
 > 建议在 `~/.hermes/` 或 `~` 目录下运行安装命令。
@@ -240,9 +259,27 @@ token-stats -b hermes --from 2026-01-01 --to 2026-05-18 --export
 token-stats -b claude-code --from 2026-01-01 --to 2026-05-18 --export
 ```
 
-流程：先显示统计 → 请输入导出目录路径 → 选择 JSON 还是 CSV。
+ 流程：先显示格式化汇总 → 请输入导出目录路径 → 选择 JSON 还是 CSV。
 
-支持三大操作系统路径：
+  导出汇总示例：
+  ```text
+  📊 Hermes — 导出 (2026-05-18)
+  ════════════════════════════════════════════════════
+    deepseek-v4-flash
+      上下文          119.2K / 1.05M (11.4%)
+      输入 tokens      82.6K
+      输出 tokens      36.6K
+      缓存 tokens      7.93M
+      调用次数        115 次 (今日: 42 次)
+      ─────────────────────────────────────
+      总计 tokens     119.2K
+      总计 + 缓存     8.05M
+  ```
+
+  JSON 导出包含：模型、输入/输出/缓存 tokens、调用次数、今日总调用、总计 tokens、总计+缓存。
+  CSV 导出包含相同字段。
+
+  支持三大操作系统路径：
 - macOS/Linux: `~/Desktop`, `/tmp/data`
 - Windows: `C:\Users\xxx\Documents`
 
@@ -259,9 +296,20 @@ token-stats -b claude-code --watch 2   # 2 秒刷新一次
 
 每 N 秒自动刷新（默认 5 秒），Ctrl+C 停止后输出汇总表和监控期间总增量。
 
+输出示例：
+```text
+── [05:30:45] +347 tokens (+1 调用) ──
+  deepseek-v4-flash | 上下文 119.2K/1.05M (11.4% ✅) | 输入 +333/82.6K tokens | 输出 +14/36.6K tokens | 缓存 +103.0K/7.93M tokens | 调用 +1/115
+  📅 今日  输入 480.0K tokens | 输出 120.0K tokens | 总计 600.0K tokens | 缓存 8.50M tokens | 调用 22 次
+
+── [05:30:50] 无变化 ──
+  deepseek-v4-flash | 上下文 119.2K/1.05M (11.4% ✅) | 输入 82.6K tokens | 输出 36.6K tokens | 缓存 7.93M tokens | 调用 115
+```
+
 **实时监控能告诉你：**
-- 当前会话的上下文占比还有多少余量（`上下文 120.0K/1.05M (11.4% ✅)`）
-- 每一轮对话实际消耗了多少 tokens（增量显示）
+- 当前会话的上下文占比还有多少余量（`上下文 119.2K/1.05M (11.4% ✅)`）
+- 每一轮对话的**输入/输出/缓存**各自增量和累计量
+- 大模型调用次数：**本轮增量 / 窗口累计**
 - 上下文窗口是否快要占满（>90% 🚨 提示），避免模型静默丢弃最早的消息
 - 监控结束后汇总监控期间的总消耗，方便对比不同会话的开销
 

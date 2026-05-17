@@ -114,6 +114,25 @@ token-stats -b hermes
 
 If all three checks produce output, installation is successful 🎉
 
+## Updating
+
+```bash
+# Pull the latest version from ClawHub
+clawhub update agent-usage-stats
+
+# Re-run setup (needed if the script changed)
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+
+# Verify version
+token-stats --version
+```
+
+> 💡 It's recommended to re-run `setup` after every update so the global command stays current.
+> If `clawhub update` doesn't change the version, use `--force`:
+> ```bash
+> clawhub install agent-usage-stats --force
+> ```
+
 > ⚠️ ClawHub installs skills into a `skills/` folder under your **current working directory**.
 > Run `clawhub install` from `~` or `~/.hermes/` to keep things tidy.
 
@@ -242,9 +261,20 @@ token-stats -b claude-code --watch 2   # 2-second interval
 
 Polls every N seconds (default 5). Ctrl+C to stop and see a summary with final state + total delta.
 
+Example output:
+```text
+── [05:30:45] +347 tokens (+1 calls) ──
+  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input +333/82.6K tokens | output +14/36.6K tokens | cache +103.0K/7.93M tokens | calls +1/115
+  📅 today  input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22
+
+── [05:30:50] no change ──
+  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input 82.6K tokens | output 36.6K tokens | cache 7.93M tokens | calls 115
+```
+
 **What live monitoring tells you:**
-- Current context window occupancy (`context 120.0K/1.05M (11.4% ✅)`) — how full is your session?
-- Actual tokens burned per round (delta display)
+- Current context window occupancy (`context 119.2K/1.05M (11.4% ✅)`) — how full is your session?
+- Per-round **input/output/cache** delta and cumulative
+- **Model calls: delta / window total**
 - Whether the context window is nearly full (>90% 🚨), before the model silently drops older messages
 - Summary of total consumption during the monitoring session
 

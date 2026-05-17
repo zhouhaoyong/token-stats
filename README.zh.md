@@ -300,7 +300,7 @@ token-stats -b claude-code --watch 2   # 2 秒刷新一次
 ```text
 ── [05:30:45] +347 tokens (+1 调用) ──
   deepseek-v4-flash | 上下文 119.2K/1.05M (11.4% ✅) | 输入 +333/82.6K tokens | 输出 +14/36.6K tokens | 缓存 +103.0K/7.93M tokens | 调用 +1/115
-  📅 今日  输入 480.0K tokens | 输出 120.0K tokens | 缓存 8.50M tokens | 调用 22 次
+  📅 今日  输入 480.0K tokens | 输出 120.0K tokens | 总计 600.0K tokens | 缓存 8.50M tokens | 调用 22 次
 
 ── [05:30:50] 无变化 ──
   deepseek-v4-flash | 上下文 119.2K/1.05M (11.4% ✅) | 输入 82.6K tokens | 输出 36.6K tokens | 缓存 7.93M tokens | 调用 115

@@ -410,7 +410,8 @@ class BaseAgent(ABC):
                         td_cache = today_data.stats.get("cache_read", 0)
                         td_calls = today_data.stats.get("api_calls", 0)
                     parts = [f"📅 今日  输入 {fmt_num(td_in)} tokens",
-                             f"输出 {fmt_num(td_out)} tokens"]
+                             f"输出 {fmt_num(td_out)} tokens",
+                             f"总计 {fmt_num(td_in + td_out)} tokens"]
                     if td_cache:
                         parts.append(f"缓存 {fmt_num(td_cache)} tokens")
                     parts.append(f"调用 {td_calls} 次")
