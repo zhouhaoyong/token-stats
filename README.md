@@ -11,7 +11,7 @@
 
 ## ✨ Features
 
-- **Per-task statistics**: Not cumulative — tracks exactly what this task consumed
+- **Per-task statistics**. Not cumulative — tracks exactly what this task consumed
 - **Multi-model-aware**: Supports workflows that switch between models mid-session
 - **Sub-agent tracking**: Detects Claude Code Explore, OpenClaw sub-tasks, etc.
 - **Cross-platform**: Works on macOS, Linux, Windows (pure Python + SQLite + JSON)
