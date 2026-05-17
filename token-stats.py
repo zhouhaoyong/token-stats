@@ -990,7 +990,7 @@ def main():
         return
 
     # ── 版本号 ──
-    VERSION = "1.3.2"
+    VERSION = "1.4.0"
     if args.version:
         print(f"token-stats v{VERSION}")
         return
