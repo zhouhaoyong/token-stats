@@ -96,6 +96,20 @@ token-stats --list-backends
 # 如果看到 ✅ 就说明装好了
 ```
 
+#### 怎么更新到新版？
+
+```bash
+# ClawHub 安装的（更新单个 skill）
+clawhub update agent-usage-stats
+
+# ClawHub 安装的（更新所有 skill）
+clawhub update
+
+# 直接下载的（重新下载覆盖即可）
+curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
+chmod +x token-stats.py
+```
+
 ---
 
 ### 第 2 步：开始记账
