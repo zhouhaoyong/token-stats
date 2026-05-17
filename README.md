@@ -92,9 +92,21 @@ echo "`nfunction token-stats { python3 `"$HOME\.hermes\skills\agent-usage-stats\
 
 **装好后验证一下：**
 ```bash
+# 查看版本号
+token-stats --version
+
+# 检测支持的 AI 工具（✅ 表示已安装可用的）
 token-stats --list-backends
-# 如果看到 ✅ 就说明装好了
+
+# 验证数据完整性
+token-stats --validate
 ```
+
+> ⚠️ **注意：** `clawhub` 命令需要在 `~` 目录下跑，否则可能装错位置。
+> 如果 `token-stats --version` 报错，试试完整路径：
+> ```bash
+> python3 ~/.hermes/skills/agent-usage-stats/token-stats.py --version
+> ```
 
 #### 怎么更新到新版？
 
@@ -108,6 +120,24 @@ clawhub update
 # 直接下载的（重新下载覆盖即可）
 curl -O https://raw.githubusercontent.com/zhouhaoyong/token-stats/main/token-stats.py
 chmod +x token-stats.py
+```
+
+#### 怎么卸载？
+
+```bash
+# ClawHub 安装的（卸载 skill）
+clawhub uninstall agent-usage-stats
+
+# 直接下载的（删掉脚本文件就行）
+rm token-stats.py
+
+# 如果设置了 alias，也清理一下
+# macOS: 打开 ~/.zshrc 删掉 token-stats 那行
+# Linux:  打开 ~/.bashrc 删掉 token-stats 那行
+# 或者直接用 sed
+sed -i '' '/token-stats/d' ~/.zshrc   # macOS
+# sed -i '/token-stats/d' ~/.bashrc   # Linux
+source ~/.zshrc                        # 重新加载
 ```
 
 ---
@@ -181,22 +211,21 @@ token-stats --watch
 
 #### 方法一：终端分栏模式（推荐）
 
-```
+```text
 VS Code 窗口
-┌──────────────────────────────────────┐
-│                                      │
-│  [代码编辑区]                         │
-│                                      │
-├──────────────────────────────────────┤
-│  底部终端（Ctrl+\` 打开）             │
-│                                      │
-│  $ token-stats --watch --backend     │
-│    claude-code                       │
-│                                      │
-│  [14:32] +1.2K tokens (1 次调用)     │
-│  [14:35] +3.4K tokens (2 次调用)     │
-│                                      │
-└──────────────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│                                               │
+│  [代码编辑区]                                  │
+│                                               │
+├───────────────────────────────────────────────┤
+│  底部终端（Ctrl+\` 打开）                      │
+│                                               │
+│  $ token-stats --watch --backend claude-code  │
+│                                               │
+│  [14:32] +1.2K tokens (1 次调用)              │
+│  [14:35] +3.4K tokens (2 次调用)              │
+│                                               │
+└───────────────────────────────────────────────┘
 ```
 
 打开 VS Code，按 `` Ctrl+` `` 打开终端，输入：

@@ -974,6 +974,7 @@ def main():
     parser.add_argument("--list-backends", action="store_true", help="列出可用后端")
     parser.add_argument("-b", "--backend", default="auto", help="后端: hermes/claude-code/openclaw/codex/auto")
     parser.add_argument("--recent", type=int, help="最近 N 条会话")
+    parser.add_argument("--version", action="store_true", help="显示版本号")
     parser.add_argument("--watch", nargs="?", type=int, const=10, default=None, metavar="秒",
                         help="实时监控模式（默认每 10 秒轮询）")
 
@@ -986,6 +987,12 @@ def main():
             b = cls()
             ok = "✅" if b.detect() else "❌"
             print(f"  {ok} {b.name():<15} {b.__class__.__doc__ or ''}")
+        return
+
+    # ── 版本号 ──
+    VERSION = "1.3.0"
+    if args.version:
+        print(f"token-stats v{VERSION}")
         return
 
     # ── 选择后端 ──
