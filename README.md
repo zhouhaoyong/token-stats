@@ -225,7 +225,23 @@ token-stats -b hermes --watch
 token-stats -b claude-code --watch 2   # 2-second interval
 ```
 
-Polls every 5 seconds (configurable). Ctrl+C to stop and see a summary table.
+Polls every N seconds (default 5). Ctrl+C to stop and see a summary with final state + total delta.
+
+**What live monitoring tells you:**
+- Current context window occupancy (`context 120.0K/1.05M (11.4% ✅)`) — how full is your session?
+- Actual tokens burned per round (delta display)
+- Whether the context window is nearly full (>90% 🚨), before the model silently drops older messages
+- Summary of total consumption during the monitoring session
+
+**Why this matters if you never `/new`:**
+
+Running without ever starting a fresh session won't crash the model, but has three real costs:
+
+1. **Cost per round skyrockets** — at 800K context each round sends ~800K input tokens; 10 rounds can cost $1+. After `/new`, each round sends just a few K — nearly free
+2. **Response gets slower** — processing 1M context is much slower than 100K; you'll feel the delay before the first character appears
+3. **Model silently forgets** — past the context limit, the oldest messages are quietly dropped with **zero warning**. Ask "remember what we said earlier?" and the model may confidently fabricate an answer
+
+> 💡 **Recommended strategy**: consider `/new` when context exceeds **60%**, strongly recommended above **90%**. Carry key info (preferences, project structure, config) via memory or notes into the fresh session.
 
 ### See what's installed
 
