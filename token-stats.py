@@ -38,6 +38,8 @@ import sys
 import re
 import glob
 import argparse
+import time
+import signal
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -91,6 +93,16 @@ MODEL_CONTEXT_MAP = {
 }
 
 DEFAULT_CONTEXT = 131_072  # 128K 安全默认值
+
+
+def fmt_num(n: int) -> str:
+    """格式化大数字：1234 → 1.2K, 1234567 → 1.2M"""
+    if n < 1000:
+        return str(n)
+    elif n < 1_000_000:
+        return f"{n/1000:.1f}K"
+    else:
+        return f"{n/1_000_000:.2f}M"
 
 
 def detect_context(model_name: str) -> int:
@@ -216,6 +228,82 @@ class BaseBackend(ABC):
     def detect() -> bool:
         """检测本后端是否可用"""
         ...
+
+    def watch(self, interval: int = 10) -> None:
+        """实时监控模式：每 N 秒轮询一次，输出增量变化。按 Ctrl+C 停止。"""
+        running = True
+
+        def _on_signal(sig, frame):
+            nonlocal running
+            running = False
+
+        signal.signal(signal.SIGINT, _on_signal)
+        signal.signal(signal.SIGTERM, _on_signal)
+
+        print(f"📡 实时监控 [{self.name()}] — 每 {interval} 秒刷新一次 (Ctrl+C 停止)\n")
+        time.sleep(0.5)
+
+        # 第 1 步：记录初始基线
+        self.save_baseline()
+        total_delta = TaskStats(backend=self.name(), models=[])
+        first = True
+
+        while running:
+            time.sleep(interval)
+            if not running:
+                break
+
+            try:
+                delta = self.get_delta()
+                # get_delta 删除基线，重新保存以便下一轮使用
+                self.save_baseline()
+            except BackendError as e:
+                print(f"  ⚠️ {e}")
+                continue
+
+            # 检查是否有实际变化
+            has_change = any(
+                m.api_calls > 0 or m.input_tokens > 0 or m.output_tokens > 0
+                for m in delta.models
+            )
+
+            if has_change:
+                now = datetime.now().strftime("%H:%M:%S")
+                parts = []
+                for m in delta.models:
+                    if m.api_calls > 0 or m.input_tokens > 0 or m.output_tokens > 0:
+                        tok = m.input_tokens + m.output_tokens
+                        cache = f" · cache {fmt_num(m.cache_read)}" if m.cache_read else ""
+                        parts.append(f"{m.model} +{fmt_num(tok)} tokens ({m.api_calls} 次){cache}")
+                        # 累计到 total_delta
+                        existing = next((x for x in total_delta.models if x.model == m.model), None)
+                        if existing:
+                            existing.api_calls += m.api_calls
+                            existing.input_tokens += m.input_tokens
+                            existing.output_tokens += m.output_tokens
+                            existing.cache_read += m.cache_read
+                        else:
+                            total_delta.models.append(m)
+                if parts:
+                    print(f"[{now}] {' | '.join(parts)}")
+                    total_delta.cumulative_input += sum(m.input_tokens for m in delta.models)
+                    total_delta.cumulative_output += sum(m.output_tokens for m in delta.models)
+            elif first:
+                print("  等待数据变化...")
+
+            first = False
+
+        # Ctrl+C 停止后输出汇总
+        if total_delta.models:
+            print(f"\n━━━ 本次监控会话合计 ━━━")
+            for m in total_delta.models:
+                tok = m.input_tokens + m.output_tokens
+                print(f"  {m.model}: {m.api_calls} 次调用 · {fmt_num(tok)} tokens")
+            total_tok = total_delta.cumulative_input + total_delta.cumulative_output
+            print(f"  ───────────────")
+            print(f"  合计: {sum(m.api_calls for m in total_delta.models)} 次调用 · {fmt_num(total_tok)} tokens")
+        else:
+            print("\n📭 监控期间未检测到数据变化")
 
 
 # ═══════════════════════════════════════════════════
@@ -886,6 +974,8 @@ def main():
     parser.add_argument("--list-backends", action="store_true", help="列出可用后端")
     parser.add_argument("-b", "--backend", default="auto", help="后端: hermes/claude-code/openclaw/codex/auto")
     parser.add_argument("--recent", type=int, help="最近 N 条会话")
+    parser.add_argument("--watch", nargs="?", type=int, const=10, default=None, metavar="秒",
+                        help="实时监控模式（默认每 10 秒轮询）")
 
     args = parser.parse_args()
 
@@ -944,6 +1034,17 @@ def main():
     if args.summary:
         try:
             print(backend.get_summary())
+        except BackendError as e:
+            print(f"❌ [{backend.name()}] {e}")
+            sys.exit(1)
+        return
+
+    # ── 实时监控 ──
+    if args.watch is not None:
+        try:
+            backend.watch(interval=args.watch)
+        except KeyboardInterrupt:
+            print("\n👋 监控已停止")
         except BackendError as e:
             print(f"❌ [{backend.name()}] {e}")
             sys.exit(1)
