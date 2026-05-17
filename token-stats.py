@@ -355,9 +355,10 @@ class BaseAgent(ABC):
                 bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
                 d_in = mv["input"] - bl["input"]
                 d_out = mv["output"] - bl["output"]
+                d_tok = d_in + d_out
                 d_cache = mv.get("cache", 0) - bl.get("cache", 0)
                 d_calls = mv["calls"] - bl["calls"]
-                has_delta = d_in > 0 or d_out > 0 or d_cache > 0 or d_calls > 0
+                has_delta = d_tok > 0 or d_cache > 0 or d_calls > 0
 
                 cw = detect_context(mn)
                 total = mv["input"] + mv["output"]
@@ -367,14 +368,12 @@ class BaseAgent(ABC):
                 parts = [ctx_str]
 
                 if has_delta:
-                    parts.append(f"输入 +{fmt_num(d_in)}/累计 {fmt_num(mv['input'])}")
-                    parts.append(f"输出 +{fmt_num(d_out)}/累计 {fmt_num(mv['output'])}")
+                    parts.append(f"tokens +{fmt_num(d_tok)}/累计 {fmt_num(total)}")
                     if d_cache or mv.get("cache", 0):
                         parts.append(f"缓存 +{fmt_num(d_cache)}/累计 {fmt_num(mv.get('cache', 0))}")
                     parts.append(f"调用 +{d_calls}/窗口累计 {mv['calls']}")
                 else:
-                    parts.append(f"输入 {fmt_num(mv['input'])}")
-                    parts.append(f"输出 {fmt_num(mv['output'])}")
+                    parts.append(f"tokens {fmt_num(total)}")
                     if mv.get("cache", 0):
                         parts.append(f"缓存 {fmt_num(mv['cache'])}")
                     parts.append(f"调用 {mv['calls']}")
