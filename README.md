@@ -38,11 +38,10 @@ Before installing `token-stats`, make sure you have these:
 `token-stats` is a pure Python script using only stdlib — no pip packages needed.
 
 ```bash
-# Check
+# Check (Windows users: use python --version)
 python3 --version
 
 # If missing → https://www.python.org/downloads/
-# macOS usually ships with Python 3. Windows needs a manual install.
 ```
 
 ### 2. Node.js (needed for the installer)
@@ -65,7 +64,7 @@ Node.js includes `npm`, which is used to install ClawHub.
 npm install -g clawhub
 
 # Verify
-clawhub --version   # should show v0.9.x
+clawhub -V          # show version
 ```
 
 > 💡 On macOS with Homebrew-installed Node.js, `npm install -g clawhub` puts it at `/opt/homebrew/bin/clawhub`, which is usually already in your PATH.
@@ -108,7 +107,7 @@ That's it. Open a new terminal and run `token-stats`.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.3.2
+# Output: token-stats v2.3.3
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -517,6 +516,23 @@ Output always starts with `📊 Agent Name`, followed by one line per **model wi
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads table |
 | OpenClaw | `~/.openclaw/agents/main/sessions/sessions.json` |
+
+### Windows + WSL2
+
+If your agent runs inside WSL2, `token-stats` reads data via `\\wsl.localhost` paths when executed from Windows. Requirements:
+
+1. **WSL distro must be running** — open a WSL terminal first
+2. **Agent may lock the database** — Hermes locks `state.db` while running; close Hermes to read stats
+3. **Proxy conflicts** — VPN/proxy may affect WSL networking (`wsl: localhost proxy detected`), but local file access is unaffected
+
+> If data read fails, install `token-stats` directly inside WSL:
+> ```bash
+> wsl ~
+> cd ~
+> clawhub install agent-usage-stats
+> python3 ~/skills/agent-usage-stats/token-stats.py setup
+> token-stats --all
+> ```
 
 ### Supported Models (69 models, 13 providers)
 

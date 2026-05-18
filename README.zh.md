@@ -38,11 +38,10 @@
 `token-stats` 本身是纯 Python 脚本，依赖标准库，不需要额外 pip 装任何包。
 
 ```bash
-# 检查已安装
+# 检查已安装（Windows 用户用 python --version）
 python3 --version
 
 # 如果没装 → 去 https://www.python.org/downloads/ 下载
-# macOS 通常自带 Python 3，Windows 需要手动装
 ```
 
 ### 2. Node.js（安装工具时需要）
@@ -65,7 +64,7 @@ node --version
 npm install -g clawhub
 
 # 验证
-clawhub --version   # 应该显示 v0.9.x
+clawhub -V          # 显示版本号
 ```
 
 > 💡 如果你用的是 macOS 且通过 Homebrew 装过 Node.js，
@@ -152,7 +151,7 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.3.2
+# 输出: token-stats v2.3.3
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -579,6 +578,23 @@ token-stats --list-backends
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads 表 |
 | OpenClaw | `~/.openclaw/agents/main/sessions/` |
+
+### Windows + WSL2 用户
+
+如果 Agent 跑在 WSL2 中，`token-stats` 在 Windows 侧运行时通过 `\\wsl.localhost` 路径访问数据。需满足：
+
+1. **WSL 发行版需处于运行状态** — 打开一个 WSL 终端即可
+2. **读取时 Agent 可能锁定数据库** — Hermes 运行时 `state.db` 被锁，关闭 Hermes 后可正常读取
+3. **代理冲突** — 如果本机开了 VPN/代理，WSL 网络可能受影响（`wsl: 检测到 localhost 代理配置`），但不影响本地文件访问
+
+> 如果数据读取失败，可以直接在 WSL 内安装 `token-stats`：
+> ```bash
+> wsl ~
+> cd ~
+> clawhub install agent-usage-stats
+> python3 ~/skills/agent-usage-stats/token-stats.py setup
+> token-stats --all
+> ```
 
 ### 支持的模型（69 个模型，13 个厂商）
 

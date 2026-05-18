@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.2"
+VERSION = "2.3.3"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -62,6 +62,104 @@ except Exception:
         sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
     except Exception:
         pass
+
+# ── WSL 兼容 ──
+# Windows 上 WSL2 中运行的 Agent 数据可通过 \\wsl$\ 访问
+
+_WSL_HOMES_CACHE = None
+
+
+def _get_wsl_homes():
+    """Windows 上枚举 WSL 发行版中可能存放 Agent 数据的 home 目录。返回路径列表（缓存结果）。"""
+    global _WSL_HOMES_CACHE
+    if _WSL_HOMES_CACHE is not None:
+        return _WSL_HOMES_CACHE
+    if sys.platform != "win32":
+        _WSL_HOMES_CACHE = []
+        return []
+    homes = []
+
+    # 方式 1：wsl.exe 枚举（最可靠，UNC 目录列表在某些机器上不通）
+    try:
+        import subprocess
+        distros_out = subprocess.run(
+            ["wsl.exe", "-l", "-q"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5,
+        )
+        # wsl.exe 自身输出为 UTF-16LE
+        for line in distros_out.stdout.decode("utf-16-le", errors="ignore").splitlines():
+            distro = line.strip()
+            if not distro:
+                continue
+            try:
+                home_out = subprocess.run(
+                    ["wsl.exe", "-d", distro, "--", "bash", "-c", "echo $HOME"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5,
+                )
+                # bash 命令输出为 UTF-8
+                wsl_home = home_out.stdout.decode("utf-8", errors="ignore").strip()
+                if wsl_home and wsl_home.startswith("/"):
+                    homes.append(f"//wsl.localhost/{distro}{wsl_home}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 方式 2：UNC 路径直接枚举（回退，某些机器上更快）
+    if not homes:
+        for wsl_root in [r"\\wsl.localhost", r"\\wsl$"]:
+            try:
+                for distro in os.listdir(wsl_root):
+                    distro_dir = os.path.join(wsl_root, distro)
+                    if not os.path.isdir(distro_dir):
+                        continue
+                    for sub in ["home", "root"]:
+                        home_base = os.path.join(distro_dir, sub)
+                        if os.path.isdir(home_base):
+                            try:
+                                for user in os.listdir(home_base):
+                                    uh = os.path.join(home_base, user)
+                                    if os.path.isdir(uh):
+                                        homes.append(uh)
+                            except (OSError, PermissionError):
+                                pass
+            except (OSError, PermissionError, FileNotFoundError):
+                continue
+
+    # 统一为正斜杠格式，Windows 下 Python 访问 WSL UNC 路径需要 /
+    homes = [h.replace("\\", "/") for h in homes]
+    _WSL_HOMES_CACHE = homes
+    return homes
+
+
+def _resolve_path(relative_path):
+    """解析路径：先查本机 ~，再查 WSL home（Windows + wsl.exe 探测），返回首个存在的路径。"""
+    native = os.path.join(os.path.expanduser("~"), relative_path)
+    if os.path.exists(native):
+        return native
+    for wh in _get_wsl_homes():
+        wp = os.path.join(wh, relative_path)
+        if os.path.exists(wp):
+            return wp
+        # UNC 不通时，通过 wsl.exe 探测文件是否存在
+        if sys.platform == "win32":
+            try:
+                import subprocess
+                parts = wh.replace("\\", "/").strip("/").split("/")
+                # wh = //wsl.localhost/Distro/home/user
+                if len(parts) >= 4 and parts[0] in ("wsl.localhost", "wsl$"):
+                    distro = parts[1]
+                    wsl_path = "/" + "/".join(parts[3:]) + "/" + relative_path.lstrip(".")
+                    probe = subprocess.run(
+                        ["wsl.exe", "-d", distro, "--", "test", "-e", wsl_path],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+                    )
+                    if probe.returncode == 0:
+                        return wp  # 文件在 WSL 中存在，返回 UNC 路径
+            except Exception:
+                pass
+    return native
+
 
 # ── 路径配置系统 ──
 # 支持 setup 时自动检测 Agent 路径，保存到配置文件
@@ -88,31 +186,41 @@ def _save_agent_paths(paths: dict):
 
 
 def _scan_all_agent_paths() -> dict:
-    """扫描本机所有 Agent 的数据路径，返回 {agent_name: data_path}"""
+    """扫描本机所有 Agent 的数据路径（含 WSL），返回 {agent_name: data_path}"""
+    homes = [os.path.expanduser("~")] + _get_wsl_homes()
     paths = {}
     # Hermes
-    for p in [os.path.expanduser("~/.hermes/state.db"),
-              os.path.expanduser("~/.config/hermes/state.db")]:
-        if os.path.exists(p):
-            paths["hermes_db"] = p
+    for h in homes:
+        for p in [os.path.join(h, ".hermes", "state.db"),
+                  os.path.join(h, ".config", "hermes", "state.db")]:
+            if os.path.exists(p):
+                paths["hermes_db"] = p
+                break
+        if "hermes_db" in paths:
             break
-    for p in [os.path.expanduser("~/.hermes/sessions/sessions.json"),
-              os.path.expanduser("~/.config/hermes/sessions/sessions.json")]:
-        if os.path.exists(p):
-            paths["hermes_sessions"] = p
+    for h in homes:
+        for p in [os.path.join(h, ".hermes", "sessions", "sessions.json"),
+                  os.path.join(h, ".config", "hermes", "sessions", "sessions.json")]:
+            if os.path.exists(p):
+                paths["hermes_sessions"] = p
+                break
+        if "hermes_sessions" in paths:
             break
     # Claude Code
-    for p in [os.path.expanduser("~/.claude")]:
+    for h in homes:
+        p = os.path.join(h, ".claude")
         if os.path.isdir(os.path.join(p, "projects")):
             paths["claude_dir"] = p
             break
     # CodeX
-    for p in [os.path.expanduser("~/.codex")]:
+    for h in homes:
+        p = os.path.join(h, ".codex")
         if os.path.isdir(p):
             paths["codex_dir"] = p
             break
     # OpenClaw
-    for p in [os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")]:
+    for h in homes:
+        p = os.path.join(h, ".openclaw", "agents", "main", "sessions", "sessions.json")
         if os.path.exists(p):
             paths["openclaw_sessions"] = p
             break
@@ -780,7 +888,7 @@ def _find_hermes_db() -> str:
     cfg = _load_agent_paths()
     if "hermes_db" in cfg:
         return cfg["hermes_db"]
-    return os.path.expanduser("~/.hermes/state.db")
+    return _resolve_path(".hermes/state.db")
 
 
 def _find_hermes_sessions() -> str:
@@ -788,7 +896,7 @@ def _find_hermes_sessions() -> str:
     cfg = _load_agent_paths()
     if "hermes_sessions" in cfg:
         return cfg["hermes_sessions"]
-    return os.path.expanduser("~/.hermes/sessions/sessions.json")
+    return _resolve_path(".hermes/sessions/sessions.json")
 
 
 def _hermes_current_session_id() -> str | None:
@@ -820,12 +928,28 @@ class HermesAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return os.path.exists(_find_hermes_db())
+        db = _find_hermes_db()
+        if os.path.exists(db):
+            return True
+        # WSL 路径可能 UNC 不通但 wsl.exe 已验证存在（_resolve_path 已处理）
+        return db != os.path.join(os.path.expanduser("~"), ".hermes", "state.db")
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         hermes_db = _find_hermes_db()
         conn = sqlite3.connect(hermes_db)
         conn.row_factory = sqlite3.Row
+
+        # ── schema 兼容：检测旧版 Hermes 缺少的列 ──
+        has_api_calls = True
+        has_tool_calls = True
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+            if "api_call_count" not in cols:
+                has_api_calls = False
+            if "tool_call_count" not in cols:
+                has_tool_calls = False
+        except Exception:
+            pass
 
         if from_ts is not None or to_ts is not None:
             # ── 时间段统计 ──
@@ -840,10 +964,12 @@ class HermesAgent(BaseAgent):
                 params.append(to_ts)
             clause = " AND ".join(where)
 
+            calls_expr = "SUM(api_call_count)" if has_api_calls else "0"
+            tools_expr = "SUM(tool_call_count)" if has_tool_calls else "0"
             cur = conn.execute(
                 f"SELECT model, SUM(input_tokens) as inp, SUM(output_tokens) as out, "
-                f"SUM(cache_read_tokens) as cache, SUM(api_call_count) as calls, "
-                f"SUM(tool_call_count) as tools, COUNT(*) as cnt "
+                f"SUM(cache_read_tokens) as cache, {calls_expr} as calls, "
+                f"{tools_expr} as tools, COUNT(*) as cnt "
                 f"FROM sessions WHERE {clause} GROUP BY model",
                 params
             )
@@ -894,19 +1020,21 @@ class HermesAgent(BaseAgent):
 
         # ── 当前会话 ──
         # 优先从 sessions.json 获取当前活跃会话 ID，精确查询
+        calls_col = "api_call_count" if has_api_calls else "0 as api_call_count"
+        tools_col = "tool_call_count" if has_tool_calls else "0 as tool_call_count"
         current_id = _hermes_current_session_id()
         if current_id:
             cur = conn.execute(
-                "SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
-                "api_call_count, tool_call_count, title "
-                "FROM sessions WHERE id = ?",
+                f"SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
+                f"{calls_col}, {tools_col}, title "
+                f"FROM sessions WHERE id = ?",
                 (current_id,)
             )
         else:
             cur = conn.execute(
-                "SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
-                "api_call_count, tool_call_count, title "
-                "FROM sessions ORDER BY started_at DESC LIMIT 1"
+                f"SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
+                f"{calls_col}, {tools_col}, title "
+                f"FROM sessions ORDER BY started_at DESC LIMIT 1"
             )
         row = cur.fetchone()
 
@@ -965,7 +1093,7 @@ def _find_claude_dir() -> str:
     cfg = _load_agent_paths()
     if "claude_dir" in cfg:
         return cfg["claude_dir"]
-    return os.path.expanduser("~/.claude")
+    return _resolve_path(".claude")
 
 
 class ClaudeCodeAgent(BaseAgent):
@@ -979,7 +1107,11 @@ class ClaudeCodeAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return os.path.isdir(os.path.join(_find_claude_dir(), "projects"))
+        cd = _find_claude_dir()
+        if os.path.isdir(os.path.join(cd, "projects")):
+            return True
+        native = os.path.join(os.path.expanduser("~"), ".claude")
+        return cd != native
 
     @staticmethod
     def _ts_in_range(ts_str: str, from_ts: float = None, to_ts: float = None) -> bool:
@@ -1128,8 +1260,8 @@ def _find_codex_db() -> Optional[str]:
                 reverse=True
             )
             return os.path.join(codex_dir, dbs[0]) if dbs else None
-    # 回退到标准路径
-    codex_dir = os.path.expanduser("~/.codex")
+    # 回退到标准路径（含 WSL）
+    codex_dir = _resolve_path(".codex")
     if not os.path.isdir(codex_dir):
         return None
     dbs = sorted(
@@ -1150,7 +1282,13 @@ class CodeXAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return _find_codex_db() is not None
+        db = _find_codex_db()
+        if db is not None:
+            if os.path.isdir(db) or os.path.exists(db):
+                return True
+            native = os.path.join(os.path.expanduser("~"), ".codex")
+            return db != native
+        return False
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         db = _find_codex_db()
@@ -1198,10 +1336,9 @@ class CodeXAgent(BaseAgent):
                     cnt = r["cnt"] or 0
                     per_model_list.append({"model": model, "input": ts, "output": 0,
                                             "calls": cnt, "cache": 0})
-                    # CodeX 不区分输入/输出，仅显示总计
+                    # CodeX 不区分输入/输出，仅显示总计；thread=session，调用数=会话数
                     if ts > 0 or cnt > 0:
                         parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
-                        parts.append(f"调用 {cnt}")
                         parts.append(f"{cnt} 轮会话")
                         raw_lines.append(f"  {model} | {' | '.join(parts)}")
                     total_tok += ts
@@ -1236,19 +1373,27 @@ class CodeXAgent(BaseAgent):
             per_model_list = []
             raw_lines = ["📊 CodeX"]
             total_tok = 0
+            total_cnt = 0
+            model_count = 0
             for r in rows:
                 model = r["model"] or r["model_provider"] or "codex-default"
                 ts = r["tokens"] or 0
                 cnt = r["cnt"] or 0
                 per_model_list.append({"model": model, "input": ts, "output": 0,
                                         "calls": cnt, "cache": 0})
-                # CodeX 不区分输入/输出，仅显示总计
+                # CodeX 不区分输入/输出，仅显示总计；thread=session
                 if ts > 0 or cnt > 0:
                     parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
-                    parts.append(f"调用 {cnt}")
                     parts.append(f"{cnt} 轮会话")
                     raw_lines.append(f"  {model} | {' | '.join(parts)}")
+                    model_count += 1
                 total_tok += ts
+                total_cnt += cnt
+
+            # ── 合计（多模型时显示） ──
+            if model_count > 1:
+                raw_lines.append(f"  {'─' * 36}")
+                raw_lines.append(f"  合计 | 总计 {fmt_num(total_tok)} | {total_cnt} 轮会话")
 
             if len(rows) == 1 and total_sessions > rows[0]["cnt"]:
                 raw_lines[-1] = raw_lines[-1].rstrip() + f" | 共 {total_sessions} 次会话"
@@ -1286,7 +1431,7 @@ def _find_openclaw_sessions_dir() -> Optional[str]:
         elif os.path.isdir(p):
             return p
     candidates = [
-        os.path.expanduser("~/.openclaw/agents/main/sessions"),
+        _resolve_path(".openclaw/agents/main/sessions"),
     ]
     for d in candidates:
         if os.path.isdir(d):
@@ -1302,7 +1447,7 @@ def _find_openclaw_sessions() -> Optional[str]:
         if os.path.exists(p):
             return p
     candidates = [
-        os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
+        _resolve_path(".openclaw/agents/main/sessions/sessions.json"),
     ]
     for path in candidates:
         if os.path.exists(path):
@@ -1387,7 +1532,18 @@ class OpenClawAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return _find_openclaw_sessions_dir() is not None or _find_openclaw_sessions() is not None
+        sd = _find_openclaw_sessions_dir()
+        sf = _find_openclaw_sessions()
+        if sd is not None and os.path.isdir(sd):
+            return True
+        if sf is not None and os.path.exists(sf):
+            return True
+        native = os.path.join(os.path.expanduser("~"), ".openclaw")
+        if sd and sd != os.path.join(native, "agents", "main", "sessions"):
+            return True
+        if sf and sf != os.path.join(native, "agents", "main", "sessions", "sessions.json"):
+            return True
+        return False
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         # ── 模式 A：优先从 .jsonl 文件解析（含真实 usage 数据） ──
@@ -2107,7 +2263,10 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
                     any_data = True
                 print(data.raw)
             except Exception as e:
-                print(f"  ⚠️ 读取失败: {e}")
+                msg = str(e)
+                if "locked" in msg.lower():
+                    msg = "数据库被锁定（Agent 正在运行，请先关闭 Agent）"
+                print(f"  ⚠️ 读取失败: {msg}")
         else:
             print("  (未安装)")
 
