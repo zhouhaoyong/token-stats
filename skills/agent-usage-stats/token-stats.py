@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.4"
+VERSION = "2.3.5"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -173,12 +173,22 @@ def _wsl_unc_to_linux(unc_path):
     return None, None
 
 
-def _hermes_collect_via_wsl(db_path):
-    """通过 wsl.exe 在 WSL 内查询 Hermes 数据库，返回 (rows, session_count) 或 (None, 0)。"""
+def _hermes_collect_via_wsl(db_path, from_ts=None, to_ts=None):
+    """通过 wsl.exe 在 WSL 内查询 Hermes 数据库。返回 dict 或 None。"""
     import subprocess
     distro, linux_path = _wsl_unc_to_linux(db_path)
     if not distro:
-        return None, 0
+        return None
+    # 时间筛选（含 grace 期防止旧会话 ended_at=NULL 被误纳入）
+    where = ""
+    if from_ts or to_ts:
+        parts = []
+        if from_ts:
+            grace = from_ts - 86400
+            parts.append(f"(started_at >= {from_ts} OR (ended_at IS NULL AND started_at >= {grace}) OR ended_at >= {from_ts})")
+        if to_ts:
+            parts.append(f"started_at <= {to_ts}")
+        where = " WHERE " + " AND ".join(parts)
     script = (
         "import sqlite3,json;c=sqlite3.connect(r'%s');c.row_factory=sqlite3.Row;"
         "cols={r[1] for r in c.execute('PRAGMA table_info(sessions)')};"
@@ -186,10 +196,10 @@ def _hermes_collect_via_wsl(db_path):
         "ac='api_call_count' if has_ac else '0';tc='tool_call_count' if has_tc else '0';"
         "rows=[dict(r) for r in c.execute("
         "f'SELECT model,SUM(input_tokens) inp,SUM(output_tokens) out,SUM(cache_read_tokens) cache,'"
-        "f'SUM('+ac+') calls,SUM('+tc+') tools,COUNT(*) cnt FROM sessions GROUP BY model')];"
-        "sc=c.execute('SELECT COUNT(*) FROM sessions').fetchone()[0];"
+        "f'SUM('+ac+') calls,SUM('+tc+') tools,COUNT(*) cnt FROM sessions%s GROUP BY model')];"
+        "sc=c.execute('SELECT COUNT(*) FROM sessions%s').fetchone()[0];"
         "c.close();print(json.dumps({'rows':rows,'sc':sc},default=str))"
-    ) % linux_path
+    ) % (linux_path, where, where)
     try:
         r = subprocess.run(
             ["wsl.exe", "-d", distro, "--", "python3", "-c", script],
@@ -891,6 +901,7 @@ class BaseAgent(ABC):
 
             # 总增量（最新累计 - 初始基线）
             total_d_tok = total_d_cache = total_d_calls = 0
+            total_d_in = total_d_out = 0
             delta_lines = []
             for mn, mv in sorted(bl_models.items()):
                 init = bl_initial.get(mn, {"input": 0, "output": 0, "cache": 0, "calls": 0})
@@ -899,20 +910,30 @@ class BaseAgent(ABC):
                 d_tok = d_in + d_out
                 d_cache = mv.get("cache", 0) - init.get("cache", 0)
                 d_calls = mv["calls"] - init["calls"]
-                total_d_tok += d_tok
-                total_d_cache += d_cache
-                total_d_calls += d_calls
+                total_d_in += d_in; total_d_out += d_out
+                total_d_tok += d_tok; total_d_cache += d_cache; total_d_calls += d_calls
                 if d_tok > 0 or d_cache > 0 or d_calls > 0:
-                    parts = [f"输入 +{fmt_num(d_in)} tokens",
-                             f"输出 +{fmt_num(d_out)} tokens"]
+                    parts = [f"总计 +{fmt_num(d_tok)}",
+                             f"输入 +{fmt_num(d_in)}",
+                             f"输出 +{fmt_num(d_out)}"]
                     if d_cache:
-                        parts.append(f"缓存 +{fmt_num(d_cache)} tokens")
-                    delta_lines.append(f"  {mn} | {' | '.join(parts)} | +{d_calls} 调用")
+                        parts.append(f"缓存 +{fmt_num(d_cache)}")
+                    parts.append(f"+{d_calls} 调用")
+                    delta_lines.append(f"  {mn} | {' | '.join(parts)}")
 
             if delta_lines:
-                print(f"\n  监控期间增量 (总 tokens +{fmt_num(total_d_tok)}):")
+                print(f"\n  监控期间增量:")
                 for dl in delta_lines:
                     print(dl)
+                if len(delta_lines) > 1:
+                    print(f"  {'─' * 50}")
+                    sum_parts = [f"总计 +{fmt_num(total_d_tok)}",
+                                 f"输入 +{fmt_num(total_d_in)}",
+                                 f"输出 +{fmt_num(total_d_out)}"]
+                    if total_d_cache:
+                        sum_parts.append(f"缓存 +{fmt_num(total_d_cache)}")
+                    sum_parts.append(f"+{total_d_calls} 调用")
+                    print(f"  合计 | {' | '.join(sum_parts)}")
         else:
             print("  监控期间无数据")
         print("👋 监控已停止")
@@ -973,16 +994,21 @@ class HermesAgent(BaseAgent):
         # WSL 路径可能 UNC 不通但 wsl.exe 已验证存在（_resolve_path 已处理）
         return db != os.path.join(os.path.expanduser("~"), ".hermes", "state.db")
 
-    def _try_wsl_fallback(self, hermes_db, error_msg):
+    def _try_wsl_fallback(self, hermes_db, error_msg, from_ts=None, to_ts=None):
         """WSL 路径 DB 不可用时，通过 wsl.exe 在 WSL 内读取。"""
         distro, _ = _wsl_unc_to_linux(hermes_db)
         if not distro:
             return None
         if "locked" not in error_msg.lower() and "unable to open" not in error_msg.lower():
             return None
-        result = _hermes_collect_via_wsl(hermes_db)
-        if not result or not result.get("rows"):
+        result = _hermes_collect_via_wsl(hermes_db, from_ts, to_ts)
+        if not result:
             return None
+        if not result.get("rows"):
+            # WSL 查询成功但该时段无数据，返回空 AgentData
+            label = "Hermes (WSL)"
+            return AgentData(name="hermes", display_name=label,
+                             stats={}, raw=f"{label}: 该时间段内无会话记录", per_model=[])
         rows = result["rows"]
         per_model_list = []
         raw_lines = ["📊 Hermes (WSL)"]
@@ -1012,7 +1038,7 @@ class HermesAgent(BaseAgent):
         try:
             return self._collect_impl(hermes_db, from_ts, to_ts)
         except Exception as e:
-            fb = self._try_wsl_fallback(hermes_db, str(e))
+            fb = self._try_wsl_fallback(hermes_db, str(e), from_ts, to_ts)
             if fb:
                 return fb
             raise
@@ -1038,8 +1064,11 @@ class HermesAgent(BaseAgent):
             where = []
             params = []
             if from_ts is not None:
-                where.append("(started_at >= ? OR ended_at IS NULL OR (ended_at IS NOT NULL AND ended_at >= ?))")
+                # ended_at IS NULL 仅对 1 天内的会话放行，避免旧会话 ended_at 残留 NULL
+                grace = from_ts - 86400
+                where.append("(started_at >= ? OR (ended_at IS NULL AND started_at >= ?) OR (ended_at IS NOT NULL AND ended_at >= ?))")
                 params.append(from_ts)
+                params.append(grace)
                 params.append(from_ts)
             if to_ts is not None:
                 where.append("started_at <= ?")

@@ -107,7 +107,7 @@ That's it. Open a new terminal and run `token-stats`.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.3.4
+# Output: token-stats v2.3.5
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -140,387 +140,106 @@ token-stats --version
 > clawhub install agent-usage-stats --force
 > ```
 
----
 
-## Common Commands
-
-The ones you'll actually reach for day-to-day:
+`-b` accepts `hermes` / `claude-code` / `codex` / `openclaw`, comma-separated for multiple.
 
 ```bash
-# 📊 View all agents (current stats)
-token-stats --all
+# Current snapshot
+token-stats                           # interactive picker
+token-stats -b hermes                 # direct
+token-stats -b hermes,claude-code     # multi-agent
+token-stats --all                     # all agents
 
-# 📊 View all agents — today only
-token-stats --all --today
+# Time range
+token-stats -b hermes --today         # today
+token-stats -b hermes --yesterday     # yesterday
+token-stats -b hermes --week          # this week
+token-stats -b hermes --from 2026-01-01 --to 2026-05-18
 
-# 📊 View all agents — this month (e.g. May 2026)
-token-stats --all --from 2026-05-01 --to 2026-05-31
-
-# 📤 Export → just add --export (interactive dir/format picker)
-token-stats --all --export
-token-stats --all --today --export
-token-stats --all --from 2026-05-01 --to 2026-05-31 --export
-
-# 🎯 Single agent
-token-stats -b hermes
-token-stats -b hermes --today
-token-stats -b hermes --from 2026-05-01 --to 2026-05-31
-
-# ⚖️ Today vs yesterday
+# Compare
 token-stats -b hermes --compare --a today --b yesterday
 
-# 👀 Live context monitor (alerts when context is nearly full)
+# Export
+token-stats -b hermes --export
+token-stats --all --today --export
+
+# Live monitor
 token-stats -b hermes --watch
+token-stats -b claude-code --watch 2  # 2s interval
 
-# 👀 Pick an agent interactively, then enter watch mode
-token-stats --watch
+# Maintenance
+token-stats --list-backends           # installed agents
+token-stats --setup                   # create global command
+token-stats --uninstall               # remove global command
 ```
 
-> Replace `hermes` with any agent name (`claude-code` / `codex` / `openclaw`).
-
-## Usage
-
-### Quick view
-
-```bash
-# Interactive menu
-token-stats
-
-# Skip the menu
-token-stats -b hermes
-token-stats -b claude-code
-token-stats -b codex
-token-stats -b openclaw
-
-# Multiple agents at once (comma-separated)
-token-stats -b hermes,claude-code
-
-# All agents at once
-token-stats --all
-
-# Current snapshot (same as default)
-token-stats -b hermes --now
-```
-
-Output example (one line per model, only models with data):
+Snapshot output:
 ```
 📊 Hermes
   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 缓存 480.6K | 调用 13 次
 
 📊 Claude Code
-  deepseek-v4-pro | 上下文 2.60M/1.05M (>100%) | 输入 1.78M | 输出 823.0K | 缓存 341.48M | 调用 1723 次
-  Qwen3-Coder-30B | 上下文 23.0K/131.1K (17.6% ✅) | 输入 22.9K | 输出 131 | 调用 1 次
+  deepseek-v4-pro | 总计 11.83M | 输入 8.07M | 输出 3.76M | 缓存 2116.08M | 调用 8274 次
 ```
 
-### Time range queries
-
-Shows total tokens in a period (no context %, shows session count):
+### Common scenarios
 
 ```bash
-# Today
-token-stats -b hermes --today
+# Today — all agents
+token-stats --all --today
 
-# Yesterday
-token-stats -b hermes --yesterday
-
-# This week (Monday to now)
-token-stats -b hermes --week
-
-# Last 7 days
-token-stats -b hermes --last-7d
-
-# Custom date range (from 00:00:00 to 23:59:59)
-token-stats -b hermes --from 2025-01-01 --to 2025-01-31
-```
-
-Time range output (no context %, shows session count):
-```
-📊 Hermes
-  deepseek-v4-flash | 总计 988.9K | 输入 660.5K | 输出 327.0K | 缓存 72.66M | 调用 699 次 | 4 轮会话
-```
-
-### Compare two time periods
-
-```bash
-# Shortcut vs shortcut
-token-stats -b hermes --compare --a today --b yesterday
-token-stats -b hermes --compare --a this-week --b last-week
-
-# Single day vs single day
-token-stats -b hermes --compare --a 2025-01-01 --b 2025-01-15
-
-# Date range vs date range (YYYY-MM-DD~YYYY-MM-DD)
-token-stats -b hermes --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
-```
-
-Compare output:
-```
-📊 对比: "today" vs "yesterday"  [Hermes]
-══════════════════════════════════════════════════════════════════════
-  模型                           |            A |            B |           变化
-──────────────────────────────────────────────────────────────────────
-  deepseek-v4-flash            |       988.9K |        65.4K |      -923.5K
-──────────────────────────────────────────────────────────────────────
-  总计                           |       988.9K |        65.4K |      -923.5K
-```
-
-### Export data
-
-Interactive directory + format selection:
-
-```bash
-# Export latest session
-token-stats -b hermes --export
-
-# Export today's data
+# Today — specific agent + export
 token-stats -b hermes --today --export
 
-# Export yesterday's data
-token-stats -b hermes --yesterday --export
+# This month — all agents + export
+token-stats --all --from 2026-05-01 --to 2026-05-31 --export
 
-# Export last 7 days
-token-stats -b hermes --last-7d --export
+# Today vs yesterday
+token-stats -b hermes --compare --a today --b yesterday
 
-# Export custom date range
-token-stats -b hermes --from 2025-01-01 --to 2025-01-31 --export
+# Custom date range comparison
+token-stats -b hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
 
-# Export multiple agents (comma-separated)
-token-stats -b hermes,claude-code --export
+# Multi-agent + time range
+token-stats -b hermes,claude-code --from 2026-05-01 --to 2026-05-18
 
-# Export all installed agents
-token-stats --all --export
-
-# Multi-agent + time range (all combinations work)
-token-stats -b hermes,claude-code --today --export          # Multiple agents, today only
-token-stats --all --today --export                          # All agents, today only
-token-stats --all --from 2025-01-01 --to 2025-01-31 --export  # All agents, custom period
-token-stats -b hermes,claude-code --yesterday --export      # Multiple agents, yesterday
-token-stats -b hermes,claude-code --week --export           # Multiple agents, this week
-```
-
-Flow: shows stats → prompts for directory → prompts for JSON or CSV.
-
-**Single agent export shows per-model breakdown + a "Total" row when multiple models exist:**
-```text
-📊 Hermes — Export (2026-05-18)
-════════════════════════════════════════════════════
-  deepseek-v4-flash
-    context          178.4K /   1.05M (17.0%)
-    input tokens     115.1K
-    output tokens     63.3K
-    cache tokens     18.10M
-    calls            192 (today: 24)
-    ─────────────────────────────────────
-    total tokens     178.4K
-    total + cache    18.28M
-
-  claude-sonnet-4
-    context           85.5K /  200.0K (42.8%)
-    input tokens      52.2K
-    output tokens     33.3K
-    cache tokens      2.00M
-    calls             10 (today: 24)
-    ─────────────────────────────────────
-    total tokens      85.5K
-    total + cache     2.09M
-
-  ──────────────────────────────────────────    ← auto-added for multi-model
-  Total
-    input tokens     167.3K
-    output tokens     96.6K
-    cache tokens     20.10M
-    calls            202
-    ─────────────────────────────────────
-    total tokens     263.9K
-    total + cache    20.36M
-```
-
-**Multi-agent export (`--all --export` or `-b a,b --export`):**
-Each agent is shown separately, with a grand total across all agents.
-JSON uses an `"agents": [...]` structure; CSV adds an `Agent` column.
-
-Supports all 3 OS path formats:
-- macOS/Linux: `~/Desktop`, `/tmp/data`
-- Windows: `C:\Users\xxx\Documents`
-
-### Live monitoring
-
-```bash
-# Interactive → watch
-token-stats --watch
-
-# Direct
+# Live monitor (Ctrl+C to stop)
 token-stats -b hermes --watch
-token-stats -b claude-code --watch 2   # 2-second interval
 ```
 
-Polls every N seconds (default 5). Ctrl+C to stop and see a summary with final state + total delta.
+### Context alerts
 
-Example output (single model):
-```text
-── [05:30:45] +347 tokens (+1 calls) ──
-  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input +333/82.6K tokens | output +14/36.6K tokens | cache +103.0K/7.93M tokens | calls +1/115
-  deepseek-v4-flash | input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22       ← today totals
+> 💡 During `--watch`, type `/compact` above 60%, `/new` above 90%. Works on all platforms.
 
-── [05:30:50] no change ──                                     ← single line only when nothing changed
-```
+### What each agent shows
 
-Example output (multiple models, per-model today totals + total row):
-```text
-── [05:30:55] +1.2K tokens (+2 calls) ──
-  deepseek-v4-flash | context 178.4K/1.05M (17.0% ✅) | input +968/115.1K tokens | output +232/63.3K tokens | ...
-  claude-sonnet-4    | context 85.5K/200K (42.8%) | input +87/52.2K tokens | output +40/33.2K tokens | ...
-  deepseek-v4-flash | input 481.2K tokens | output 120.2K tokens | total 601.4K tokens | cache 8.81M tokens | calls 24
-  claude-sonnet-4   | input 200.1K tokens | output 50.1K tokens | total 250.2K tokens | cache 2.01M tokens | calls 11
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-  Total             | input 681.3K tokens | output 170.3K tokens | total 851.6K tokens | cache 10.82M tokens | calls 35
-```
+| Agent | Snapshot | Time range |
+|-------|----------|------------|
+| **Hermes** | Context % + input/output/cache + calls + session count | Total + session count |
+| **Claude Code** | Total + input/output/cache + calls + sub-agents/projects | Same |
+| **CodeX** | Total + thread count | Same |
+| **OpenClaw** | Context % + input/output/cache + calls | Total + calls |
 
-**What live monitoring tells you:**
-- Current context window occupancy (`context 119.2K/1.05M (11.4% ✅)`) — how full is your session?
-- Per-round **input/output/cache** delta and cumulative
-- **Model calls: delta / window total**
-- Whether the context window is nearly full (>90% 🚨), before the model silently drops older messages
-- Summary of total consumption during the monitoring session
-
-**Why this matters if you never start a fresh session:**
-
-Running without ever starting a fresh session won't crash the model, but has three real costs:
-
-1. **Cost per round skyrockets** — at 800K context each round sends ~800K input tokens; 10 rounds can cost $1+. After a fresh session, each round sends just a few K — nearly free
-2. **Response gets slower** — processing 1M context is much slower than 100K; you'll feel the delay before the first character appears
-3. **Model silently forgets** — past the context limit, the oldest messages are quietly dropped with **zero warning**. Ask "remember what we said earlier?" and the model may confidently fabricate an answer
-
-> 💡 **Recommended strategy**:
-> - Above **60%** → type `/compact` (compresses context, faster than `/new`, retains key info)
-> - Above **90%** → type `/new` (clears context, starts fresh)
->
-> These commands work **across all platforms** (CLI, IDE plugins, chat apps like QQ/DingTalk all support slash commands).
-> IDE plugins also provide toolbar buttons ("Compact" / "New Chat") with the same effect.
->
-> Carry key info (preferences, project structure, config) via memory or notes — don't rely on context alone.
-
-### See what's installed
-
-```bash
-token-stats --list-backends
-```
-
-✅ = installed, ❌ = not found. Missing agents won't appear in the menu.
-
----
-
-## Command Reference
-
-All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, `codex`, `openclaw`.
-
-### Basics
-
-| Command | Description |
-|---------|-------------|
-| `token-stats` | Interactive menu → pick an agent → view stats |
-| `token-stats -b <name>` | Skip the menu, pick an agent directly |
-| `token-stats --version` | Show version number |
-| `token-stats -b <name> --detail` | Detailed mode (same as default) |
-| `token-stats -b <name> --now` | Current snapshot (same as default) |
-
-### Time Ranges
-
-| Command | Description |
-|---------|-------------|
-| `token-stats -b <name> --today` | Today's stats (00:00:00 ~ now) |
-| `token-stats -b <name> --yesterday` | Yesterday's stats (all day) |
-| `token-stats -b <name> --week` | This week (Monday till now) |
-| `token-stats -b <name> --last-7d` | Last 7 days |
-| `token-stats -b <name> --from 2025-01-01 --to 2025-01-31` | Custom range (start 00:00 ~ end 23:59) |
-
-### Comparison
-
-| Command | Description |
-|---------|-------------|
-| `token-stats -b <name> --compare --a today --b yesterday` | Quick label comparison |
-| `token-stats -b <name> --compare --a this-week --b last-week` | This week vs last week |
-| `token-stats -b <name> --compare --a 2025-01-01 --b 2025-01-15` | Two single-day comparison |
-| `token-stats -b <name> --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14` | Custom date range comparison |
-
-**`--a` / `--b` supported formats:**
-- `today`, `yesterday`
-- `this-week`, `last-week`
-- `YYYY-MM-DD` — single day
-- `YYYY-MM-DD~YYYY-MM-DD` — date range
-
-### Export
-
-| Command | Description |
-|---------|-------------|
-| `token-stats -b <name> --export` | Export current stats (interactive directory + format) |
-| `token-stats -b <name> --today --export` | Export today's stats |
-| `token-stats -b <name> --yesterday --export` | Export yesterday's stats |
-| `token-stats -b <name> --last-7d --export` | Export last 7 days |
-| `token-stats -b <name> --from X --to Y --export` | Export custom date range |
-| `token-stats -b <name1>,<name2> --export` | Export multiple agents (comma-separated) |
-| `token-stats --all --export` | Export all installed agents |
-
-### Live Monitoring
-
-| Command | Description |
-|---------|-------------|
-| `token-stats --watch` | Interactive → monitor, polls every 5s (Ctrl+C to stop) |
-| `token-stats -b <name> --watch` | Direct agent, default 5s interval |
-| `token-stats -b <name> --watch 10` | Custom 10s interval |
-
-### Multi-Agent
-
-| Command | Description |
-|---------|-------------|
-| `token-stats --all` | Show stats for ALL installed agents |
-| `token-stats -b <name1>,<name2>` | Show multiple agents at once (comma-separated) |
-| `token-stats --all --export` | Export stats for all agents |
-| `token-stats --list-backends` | List installed agents (check mark or cross) |
-
-### Setup & Maintenance
-
-| Command | Description |
-|---------|-------------|
-| `clawhub install agent-usage-stats` | Install from ClawHub |
-| `token-stats --setup` | Create global command + auto-add to PATH |
-| `token-stats --uninstall` | Remove global command + auto-clean PATH |
-
-> 💡 All commands above are also available via `token-stats --help`.
-
----
-
-## What each agent shows
-
-Output always starts with `📊 Agent Name`, followed by one line per **model with data** (unused models are hidden).
-
-| Agent | What you see |
-|-------|-------------|
-| **Hermes** | Model, context usage (with % + recommendation), input/output/cache tokens, API calls, session count |
-| **Claude Code** | Per-model context usage, calls, sub-agent count, total sessions/projects |
-| **CodeX** | Per-model thread count (tokens may be 0, shows session count only) |
-| **OpenClaw** | Model (with provider), context usage %, input/output tokens, agent count |
-
-### Data sources (for troubleshooting)
+### Data sources
 
 | Agent | Reads from |
 |-------|-----------|
 | Hermes | `~/.hermes/state.db` → sessions table |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads table |
-| OpenClaw | `~/.openclaw/agents/main/sessions/sessions.json` |
+| OpenClaw | `~/.openclaw/agents/main/sessions/` |
 
 ### Windows + WSL2
 
 When your agent runs inside WSL2, `token-stats` automatically detects and reads data from the Windows side. Even if Hermes is running (database locked), it reads via `wsl.exe` internally; output is labeled `(WSL)`.
 
 1. **WSL distro must be running** — open a WSL terminal first
-2. **Username agnostic** — auto-detects the WSL user's home directory, independent of Windows login
+2. **Username agnostic** — auto-detects the WSL user's home directory
 3. **Proxy unaffected** — VPN/proxy only affects WSL networking, not local file access
 
 ### Supported Models (69 models, 13 providers)
 
-`token-stats` detects your model and displays the correct context window size. Unknown models default to 128K.
+Prefix matching is supported. Unknown models default to 128K.
 
 | Provider | Models | Context |
 |----------|--------|---------|
@@ -540,11 +259,6 @@ When your agent runs inside WSL2, `token-stats` automatically detects and reads 
 | **Mistral** | `mistral-large-2`, `mistral-large`, `mistral-small` | 128K |
 | **xAI / Grok** | `grok-3`, `grok-2` | 128K |
 | **Yi / 01.AI** | `yi-large`, `yi-lightning` | 16K~32K |
-
-Prefix matching is supported: `claude-opus-4-7-20250219` → 200K, `gpt-4.1-preview` → 1M, `deepseek-v4-0324` → 1M.
-
----
-
 ## Uninstall
 
 ```bash
@@ -748,6 +462,8 @@ This ensures the skill is installed to `~/skills/` — the predictable home-dire
 > - Example: Same key used on PC A and PC B → PC A's `token-stats` only sees PC A's usage
 > - `token-stats` reads disk files — no network calls, no API dashboard queries
 > - To see another machine's stats, install `token-stats` there too
+>
+> 🕐 **Timezone**: `--today` / `--yesterday` use your **local system timezone**. E.g. on UTC+8 (Beijing), `--today` spans 00:00–23:59 CST. Machines in different timezones see different ranges.
 
 ### API Relay / Proxy Service
 
