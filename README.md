@@ -128,21 +128,14 @@ If all three checks produce output, installation is successful 🎉
 
 ## Updating
 
-**macOS / Linux:**
 ```bash
 clawhub update agent-usage-stats
-python3 ~/skills/agent-usage-stats/token-stats.py setup
 token-stats --version
 ```
 
-**Windows (PowerShell):**
-```powershell
-clawhub update agent-usage-stats
-python $HOME\skills\agent-usage-stats\token-stats.py setup
-token-stats --version
-```
+> `update` replaces files in-place — wrapper and PATH carry over, no re-setup required.
 
-> 💡 Re-run `setup` after each update. If the version doesn't change, use `--force`:
+> 💡 Version not changing? Use `--force` to pull the latest:
 > ```
 > clawhub install agent-usage-stats --force
 > ```

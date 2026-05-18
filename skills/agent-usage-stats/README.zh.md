@@ -172,21 +172,14 @@ token-stats -b hermes
 
 ## 更新
 
-**macOS / Linux：**
 ```bash
 clawhub update agent-usage-stats
-python3 ~/skills/agent-usage-stats/token-stats.py setup
 token-stats --version
 ```
 
-**Windows（PowerShell）：**
-```powershell
-clawhub update agent-usage-stats
-python $HOME\skills\agent-usage-stats\token-stats.py setup
-token-stats --version
-```
+> `update` 原地替换文件，包装器和 PATH 均无需重配。
 
-> 💡 每次更新后建议重新执行 `setup`。如果版本没变，加 `--force` 强制重装：
+> 💡 更新后版本没变？加 `--force` 强制拉取：
 > ```
 > clawhub install agent-usage-stats --force
 > ```
