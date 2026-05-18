@@ -51,7 +51,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.2.7"
+VERSION = "2.2.8"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
 try:

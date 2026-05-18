@@ -93,11 +93,12 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```powershell
 cd ~
 clawhub install agent-usage-stats
-python ~\skills\agent-usage-stats\token-stats.py setup
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```
 
 > `cd ~` ensures the skill installs to your home directory (always writable on all OSes).
 > If `python` is not found, try `python3` (Microsoft Store Python uses `python3`).
+> If you get `can't open file '...~...'`, see: [PowerShell path expansion](#ps-tilde).
 
 That's it. Run `token-stats` from any terminal.
 
@@ -106,7 +107,7 @@ That's it. Run `token-stats` from any terminal.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.2.7
+# Output: token-stats v2.2.8
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -137,7 +138,7 @@ token-stats --version
 **Windows (PowerShell):**
 ```powershell
 clawhub update agent-usage-stats
-python ~\skills\agent-usage-stats\token-stats.py setup
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 token-stats --version
 ```
 
@@ -614,6 +615,27 @@ clawhub install agent-usage-stats --force
 
 Then follow the install steps above. The home directory (`~`) is always writable on all OSes.
 
+<a id="ps-tilde"></a>
+#### ❓ PowerShell: `can't open file '...~...'`
+
+**Cause: PowerShell does not expand `~` when passed as a command argument**, treating it as a literal directory name.
+
+Error example:
+```
+python: can't open file 'C:\\Users\\xxx\\~\\skills\\...': No such file or directory
+```
+
+**Fix: use `$HOME` instead of `~`:**
+```powershell
+# ❌ Wrong
+python ~\skills\agent-usage-stats\token-stats.py setup
+
+# ✅ Correct
+python $HOME\skills\agent-usage-stats\token-stats.py setup
+```
+
+> `$HOME` is a built-in PowerShell variable that always expands to the current user directory.
+
 #### ❓ `token-stats` command not found
 
 **Cause: `~/.local/bin/` is not in PATH.**
@@ -716,7 +738,7 @@ token-stats -b hermes --export
 ```bash
 cd ~
 clawhub install agent-usage-stats --force
-python3 ~/skills/agent-usage-stats/token-stats.py setup   # Windows: python ~\skills\...
+python3 ~/skills/agent-usage-stats/token-stats.py setup   # Windows: python $HOME\skills\...
 token-stats --version
 ```
 

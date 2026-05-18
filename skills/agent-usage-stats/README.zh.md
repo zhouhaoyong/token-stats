@@ -137,7 +137,10 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```powershell
 cd ~
 clawhub install agent-usage-stats
-python ~\skills\agent-usage-stats\token-stats.py setup
+python $HOME\skills\agent-usage-stats\token-stats.py setup
+```
+
+> 如果报错 `can't open file '...~...'`，说明 PowerShell 没有正确展开路径，参考：[PowerShell 路径展开问题](#ps-tilde)
 ```
 
 > `cd ~` 确保技能安装到用户主目录（所有系统都有写入权限）。
@@ -150,7 +153,7 @@ python ~\skills\agent-usage-stats\token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.2.7
+# 输出: token-stats v2.2.8
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -181,7 +184,7 @@ token-stats --version
 **Windows（PowerShell）：**
 ```powershell
 clawhub update agent-usage-stats
-python ~\skills\agent-usage-stats\token-stats.py setup
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 token-stats --version
 ```
 
@@ -703,6 +706,27 @@ clawhub install agent-usage-stats --force
 ```
 
 然后按上方安装指引执行 `setup`。主目录 (`~`) 在所有系统上都有写入权限，不会出现权限问题。
+
+<a id="ps-tilde"></a>
+#### ❓ PowerShell 报 `can't open file '...~...'`
+
+**原因：PowerShell 作为命令行参数传递 `~` 时不会展开**，`~` 被当作字面量目录名。
+
+错误示例：
+```
+python: can't open file 'C:\\Users\\xxx\\~\\skills\\...': No such file or directory
+```
+
+**解决：用 `$HOME` 替代 `~`：**
+```powershell
+# ❌ 错误
+python ~\skills\agent-usage-stats\token-stats.py setup
+
+# ✅ 正确
+python $HOME\skills\agent-usage-stats\token-stats.py setup
+```
+
+> `$HOME` 是 PowerShell 内置变量，始终展开为当前用户目录。
 
 #### ❓ `token-stats` 命令找不到
 
