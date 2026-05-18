@@ -45,14 +45,14 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.2.4"
+VERSION = "2.2.5"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
-sys.stdout.reconfigure(line_buffering=True)
+sys.stdout.reconfigure(line_buffering=True, encoding="utf-8")
 
 # ── 路径配置系统 ──
 # 支持 setup 时自动检测 Agent 路径，保存到配置文件
@@ -103,8 +103,7 @@ def _scan_all_agent_paths() -> dict:
             paths["codex_dir"] = p
             break
     # OpenClaw
-    for p in [os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
-              os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json")]:
+    for p in [os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")]:
         if os.path.exists(p):
             paths["openclaw_sessions"] = p
             break
@@ -193,22 +192,100 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
         lines.append(f"    {'合计':<{name_w}} | {' | '.join(parts2)}")
     return lines
 MODEL_CONTEXT_MAP = {
+    # ── Anthropic / Claude (all 200K) ──
+    "claude-opus-4-7": 200_000,
+    "claude-opus-4-5": 200_000,
+    "claude-opus-4": 200_000,
+    "claude-sonnet-4-6": 200_000,
+    "claude-sonnet-4-5": 200_000,
+    "claude-sonnet-4": 200_000,
+    "claude-haiku-4-5": 200_000,
+    "claude-haiku-4-5-20251001": 200_000,
+    "claude-haiku-3.5": 200_000,
+    "claude-3.5-sonnet": 200_000,
+    "claude-3.5-haiku": 200_000,
+    "claude-3-opus": 200_000,
+    "claude-3-sonnet": 200_000,
+    "claude-3-haiku": 200_000,
+
+    # ── OpenAI / GPT ──
+    "gpt-4.1": 1_048_576,
+    "gpt-4.1-mini": 1_048_576,
+    "gpt-4.1-nano": 1_048_576,
+    "gpt-4o": 131_072,
+    "gpt-4o-mini": 131_072,
+    "gpt-4-turbo": 131_072,
+    "gpt-4": 131_072,
+    "o4-mini": 200_000,
+    "o3": 200_000,
+    "o3-mini": 200_000,
+    "o1": 200_000,
+    "o1-pro": 200_000,
+
+    # ── Google / Gemini (all 1M) ──
+    "gemini-2.5-pro": 1_048_576,
+    "gemini-2.5-flash": 1_048_576,
+    "gemini-2.5-flash-lite": 1_048_576,
+    "gemini-2.0-flash": 1_048_576,
+
+    # ── DeepSeek ──
     "deepseek-v4-flash": 1_048_576,
+    "deepseek-v4-pro": 1_048_576,
     "deepseek-v4": 1_048_576,
     "deepseek-chat": 1_048_576,
     "deepseek-reasoner": 1_048_576,
+    "deepseek-r1": 1_048_576,
     "deepseek-v3": 131_072,
-    "gpt-4o": 131_072,
-    "gpt-4o-mini": 131_072,
-    "claude-sonnet-4": 204_800,
-    "claude-opus-4": 204_800,
-    "claude-haiku-3.5": 204_800,
-    "gemini-2.5-pro": 1_048_576,
-    "gemini-2.0-flash": 1_048_576,
-    "qwen3": 131_072,
-    "qwen-plus": 131_072,
+
+    # ── Meta / Llama ──
+    "llama-4": 131_072,
     "llama-3.1": 131_072,
+    "llama-3": 131_072,
+
+    # ── Mistral ──
+    "mistral-large-2": 131_072,
     "mistral-large": 131_072,
+    "mistral-small": 131_072,
+
+    # ── 通义千问 / Qwen ──
+    "qwen3": 131_072,
+    "qwen3-coder": 131_072,
+    "qwen2.5-coder": 131_072,
+    "qwen-plus": 131_072,
+    "qwen-max": 131_072,
+    "qwen-turbo": 131_072,
+
+    # ── Kimi / 月之暗面 (Moonshot) ──
+    "moonshot-v1-128k": 131_072,
+    "moonshot-v1-32k": 32_768,
+    "moonshot-v1-8k": 8_192,
+    "kimi-latest": 131_072,
+
+    # ── GLM / 智谱 ──
+    "glm-4-plus": 131_072,
+    "glm-4-long": 1_048_576,
+    "glm-4-air": 131_072,
+    "glm-4-flash": 131_072,
+    "glm-4": 131_072,
+    "glm-3-turbo": 131_072,
+
+    # ── Doubao / 字节豆包 ──
+    "doubao-pro-128k": 131_072,
+    "doubao-pro-32k": 32_768,
+    "doubao-lite-32k": 32_768,
+
+    # ── 文心 / 百度 (ERNIE) ──
+    "ernie-4.0-turbo": 131_072,
+    "ernie-4.0": 8_192,
+    "ernie-3.5": 8_192,
+
+    # ── 零一万物 / Yi ──
+    "yi-large": 32_768,
+    "yi-lightning": 16_384,
+
+    # ── xAI / Grok ──
+    "grok-3": 131_072,
+    "grok-2": 131_072,
 }
 
 DEFAULT_CONTEXT = 131_072
@@ -717,7 +794,7 @@ class HermesAgent(BaseAgent):
             raw = "\n".join(raw_lines)
 
             stats = {
-                "model": ", ".join(r["model"] or "unknown" for r in rows),
+                "model": ", ".join(sorted({r["model"] or "unknown" for r in rows})),
                 "input_tokens": total_inp,
                 "output_tokens": total_out,
                 "cache_read": total_cache,
@@ -1045,7 +1122,7 @@ class CodeXAgent(BaseAgent):
 
                 raw = "\n".join(raw_lines)
                 stats = {
-                    "model": ", ".join(r["model"] or "unknown" for r in rows if r["model"]),
+                    "model": ", ".join(sorted({r["model"] or "unknown" for r in rows if r["model"]})),
                     "total_tokens": total_tok,
                     "session_count": total_cnt,
                 }
@@ -1088,7 +1165,7 @@ class CodeXAgent(BaseAgent):
 
             raw = "\n".join(raw_lines)
             stats = {
-                "model": ", ".join(r["model"] or "unknown" for r in rows if r["model"]),
+                "model": ", ".join(sorted({r["model"] or "unknown" for r in rows if r["model"]})),
                 "total_tokens": total_tok,
                 "session_count": total_sessions,
             }
@@ -1120,7 +1197,6 @@ def _find_openclaw_sessions_dir() -> Optional[str]:
             return p
     candidates = [
         os.path.expanduser("~/.openclaw/agents/main/sessions"),
-        os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions"),
     ]
     for d in candidates:
         if os.path.isdir(d):
@@ -1137,7 +1213,6 @@ def _find_openclaw_sessions() -> Optional[str]:
             return p
     candidates = [
         os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
-        os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json"),
     ]
     for path in candidates:
         if os.path.exists(path):
@@ -1724,7 +1799,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
             print("请确保目录存在，或输入 q 取消")
 
         # Step 2: 选择格式
-        print("\\n选择导出格式:")
+        print("\n选择导出格式:")
         print("  [1] JSON")
         print("  [2] CSV")
         fmt_choice = input("请选择 (1/2): ").strip().lower()
@@ -2058,7 +2133,7 @@ def main():
             print("ℹ️  未检测到任何 Agent 数据文件，运行后会自动尝试标准路径")
 
         bin_dir = os.path.dirname(target)
-        if bin_dir not in os.environ.get("PATH", "").split(":"):
+        if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
             print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
             print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.zshrc")
             print(f"   source ~/.zshrc")
@@ -2066,7 +2141,6 @@ def main():
 
     # ── list-backends ──
     if args.list_backends:
-        installed = detect_installed()
         print("\n本机已安装的 AI 助手：")
         for cls in ALL_AGENTS:
             ok = "✅" if cls.detect() else "❌"

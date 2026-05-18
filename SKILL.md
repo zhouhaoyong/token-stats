@@ -1,7 +1,7 @@
 ---
 name: agent-usage-stats
 description: "选择要监控的 AI 助手 → 查看 token 消耗。支持 Hermes / Claude Code / CodeX / OpenClaw，每次都让你选"
-version: 2.2.3
+version: 2.2.5
 author: zhouhaoyong
 license: MIT
 source: https://github.com/zhouhaoyong/token-stats
@@ -67,4 +67,4 @@ run: token-stats -b hermes
 | Hermes | `~/.hermes/state.db` → sessions 表 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads 表 |
-| OpenClaw | `~/ai-testing-lab/openclaw/data/.../sessions.json` |
+| OpenClaw | `~/.openclaw/agents/main/sessions/` |

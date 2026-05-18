@@ -132,7 +132,7 @@ clawhub install agent-usage-stats
 
 # 第 2 步：创建全局命令（setup 命令会自动写好包装器，不需修改脚本权限）
 python3 ~/skills/agent-usage-stats/token-stats.py setup
-# ⚠️ 如果报错文件不存在，见下方 → `python3 ~/skills/...` 提示文件不存在
+# ⚠️ 如果报错文件不存在，见下方 → [python3 ~/skills/... 提示文件不存在](#setup-not-found)
 ```
 
 好了。以后在终端直接敲 `token-stats` 就能用。
@@ -142,7 +142,7 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.1.1
+# 输出: token-stats v2.2.5
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -562,7 +562,32 @@ token-stats --list-backends
 | Hermes | `~/.hermes/state.db` → sessions 表 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads 表 |
-| OpenClaw | `~/ai-testing-lab/openclaw/data/.../sessions.json` |
+| OpenClaw | `~/.openclaw/agents/main/sessions/` |
+
+### 支持的模型（69 个模型，13 个厂商）
+
+`token-stats` 自动识别模型并显示正确的上下文窗口大小。未匹配的模型默认 128K。
+
+| 厂商 | 模型 | 上下文 |
+|------|------|--------|
+| **Anthropic / Claude** | `claude-opus-4-7`, `claude-opus-4-5`, `claude-opus-4`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-sonnet-4`, `claude-haiku-4-5`, `claude-haiku-3.5`, `claude-3.5-sonnet`, `claude-3.5-haiku`, `claude-3-opus`, `claude-3-sonnet`, `claude-3-haiku` | 200K |
+| **OpenAI / GPT** | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano` | 1M |
+| | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-4` | 128K |
+| | `o4-mini`, `o3`, `o3-mini`, `o1`, `o1-pro` | 200K |
+| **Google / Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash` | 1M |
+| **DeepSeek** | `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4`, `deepseek-chat`, `deepseek-reasoner`, `deepseek-r1` | 1M |
+| | `deepseek-v3` | 128K |
+| **通义千问 / Qwen** | `qwen3`, `qwen3-coder`, `qwen2.5-coder`, `qwen-plus`, `qwen-max`, `qwen-turbo` | 128K |
+| **Kimi / 月之暗面** | `moonshot-v1-128k`, `moonshot-v1-32k`, `moonshot-v1-8k`, `kimi-latest` | 8K~128K |
+| **GLM / 智谱** | `glm-4-plus`, `glm-4-long` (1M), `glm-4-air`, `glm-4-flash`, `glm-4`, `glm-3-turbo` | 128K~1M |
+| **Doubao / 字节豆包** | `doubao-pro-128k`, `doubao-pro-32k`, `doubao-lite-32k` | 32K~128K |
+| **文心 / 百度** | `ernie-4.0-turbo`, `ernie-4.0`, `ernie-3.5` | 8K~128K |
+| **Meta / Llama** | `llama-4`, `llama-3.1`, `llama-3` | 128K |
+| **Mistral** | `mistral-large-2`, `mistral-large`, `mistral-small` | 128K |
+| **xAI / Grok** | `grok-3`, `grok-2` | 128K |
+| **零一万物 / Yi** | `yi-large`, `yi-lightning` | 16K~32K |
+
+前缀匹配支持: `claude-opus-4-7-20250219` → 200K, `gpt-4.1-preview` → 1M, `deepseek-v4-0324` → 1M。
 
 ---
 
@@ -642,6 +667,7 @@ npm install -g clawhub
 npm install -g clawhub --registry=https://registry.npmmirror.com
 ```
 
+<a name="setup-not-found"></a>
 #### ❓ `python3 ~/skills/agent-usage-stats/token-stats.py setup` 提示文件不存在
 
 **原因：ClawHub 把技能装到了执行 `clawhub install` 时所在目录的 `skills/` 文件夹下。**
@@ -693,7 +719,7 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 | **Hermes** | `~/.hermes/state.db` |
 | **Claude Code** | `~/.claude/projects/` |
 | **CodeX** | `~/.codex/state_*.sqlite` |
-| **OpenClaw** | `~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json` |
+| **OpenClaw** | `~/.openclaw/agents/main/sessions/sessions.json` |
 
 可以先用 `token-stats --list-backends` 看具体哪个被检测到了。
 

@@ -86,7 +86,7 @@ clawhub install agent-usage-stats
 
 # Step 2: Create the global command (setup writes a shell wrapper, no +x needed)
 python3 ~/skills/agent-usage-stats/token-stats.py setup
-# ⚠️ If this path doesn't exist, see → Install successful but command not found
+# ⚠️ If this path doesn't exist, see → [Install successful but token-stats command not found](#setup-not-found)
 ```
 
 That's it. Now just type `token-stats` in your terminal.
@@ -98,7 +98,7 @@ That's it. Now just type `token-stats` in your terminal.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.1.1
+# Output: token-stats v2.2.5
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -499,7 +499,32 @@ Output always starts with `📊 Agent Name`, followed by one line per **model wi
 | Hermes | `~/.hermes/state.db` → sessions table |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads table |
-| OpenClaw | `~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json` |
+| OpenClaw | `~/.openclaw/agents/main/sessions/sessions.json` |
+
+### Supported Models (69 models, 13 providers)
+
+`token-stats` detects your model and displays the correct context window size. Unknown models default to 128K.
+
+| Provider | Models | Context |
+|----------|--------|---------|
+| **Anthropic / Claude** | `claude-opus-4-7`, `claude-opus-4-5`, `claude-opus-4`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-sonnet-4`, `claude-haiku-4-5`, `claude-haiku-3.5`, `claude-3.5-sonnet`, `claude-3.5-haiku`, `claude-3-opus`, `claude-3-sonnet`, `claude-3-haiku` | 200K |
+| **OpenAI / GPT** | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano` | 1M |
+| | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-4` | 128K |
+| | `o4-mini`, `o3`, `o3-mini`, `o1`, `o1-pro` | 200K |
+| **Google / Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash` | 1M |
+| **DeepSeek** | `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4`, `deepseek-chat`, `deepseek-reasoner`, `deepseek-r1` | 1M |
+| | `deepseek-v3` | 128K |
+| **Qwen / Alibaba** | `qwen3`, `qwen3-coder`, `qwen2.5-coder`, `qwen-plus`, `qwen-max`, `qwen-turbo` | 128K |
+| **Kimi / Moonshot** | `moonshot-v1-128k`, `moonshot-v1-32k`, `moonshot-v1-8k`, `kimi-latest` | 8K~128K |
+| **GLM / Zhipu** | `glm-4-plus`, `glm-4-long` (1M), `glm-4-air`, `glm-4-flash`, `glm-4`, `glm-3-turbo` | 128K~1M |
+| **Doubao / ByteDance** | `doubao-pro-128k`, `doubao-pro-32k`, `doubao-lite-32k` | 32K~128K |
+| **ERNIE / Baidu** | `ernie-4.0-turbo`, `ernie-4.0`, `ernie-3.5` | 8K~128K |
+| **Meta / Llama** | `llama-4`, `llama-3.1`, `llama-3` | 128K |
+| **Mistral** | `mistral-large-2`, `mistral-large`, `mistral-small` | 128K |
+| **xAI / Grok** | `grok-3`, `grok-2` | 128K |
+| **Yi / 01.AI** | `yi-large`, `yi-lightning` | 16K~32K |
+
+Prefix matching is supported: `claude-opus-4-7-20250219` → 200K, `gpt-4.1-preview` → 1M, `deepseek-v4-0324` → 1M.
 
 ---
 
@@ -553,6 +578,7 @@ npm install -g clawhub
 npm install -g clawhub --registry=https://registry.npmmirror.com
 ```
 
+<a name="setup-not-found"></a>
 #### ❓ `python3 ~/skills/agent-usage-stats/token-stats.py setup` says file not found
 
 **Cause: ClawHub installed skills in a different directory than `~/skills/`.**
@@ -604,7 +630,7 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 | **Hermes** | `~/.hermes/state.db` |
 | **Claude Code** | `~/.claude/projects/` |
 | **CodeX** | `~/.codex/state_*.sqlite` |
-| **OpenClaw** | `~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json` |
+| **OpenClaw** | `~/.openclaw/agents/main/sessions/sessions.json` |
 
 Run `token-stats --list-backends` to see what's detected.
 

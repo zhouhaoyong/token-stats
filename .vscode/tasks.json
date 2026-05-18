@@ -2,36 +2,6 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "📊 token-stats: 查看累计",
-      "type": "shell",
-      "command": "token-stats --summary",
-      "detail": "查看当前会话累计消耗了多少 tokens",
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated"
-      }
-    },
-    {
-      "label": "📊 token-stats: 开始任务",
-      "type": "shell",
-      "command": "token-stats --save-baseline",
-      "detail": "记录当前状态为任务起点（任务前执行）",
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated"
-      }
-    },
-    {
-      "label": "📊 token-stats: 结束任务",
-      "type": "shell",
-      "command": "token-stats --delta",
-      "detail": "输出本次任务消耗的 token 统计（任务后执行）",
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated"
-      }
-    },
-    {
       "label": "📊 token-stats: 实时监控 (5s)",
       "type": "shell",
       "command": "token-stats --watch",
