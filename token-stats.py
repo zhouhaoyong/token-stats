@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.6"
+VERSION = "2.3.7"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -525,6 +525,20 @@ def parse_time_label(label: str) -> tuple:
     return parse_date(s)
 
 
+def _progress_bar(pct: float) -> str:
+    """10 段上下文进度条，带 ANSI 颜色。"""
+    n = min(10, max(0, round(pct / 10)))
+    bar = "█" * n + "░" * (10 - n)
+    # ANSI 颜色：绿(<60%) / 黄(60-90%) / 红(>90%)
+    if pct >= 90:
+        color = "\033[31m"  # 红
+    elif pct >= 60:
+        color = "\033[33m"  # 黄
+    else:
+        color = "\033[32m"  # 绿
+    return f"{color}[{bar}]\033[0m {pct}%"
+
+
 def _display_width(s: str) -> int:
     """计算终端显示宽度（CJK 字符算 2 列，ASCII 算 1 列）。"""
     w = 0
@@ -705,7 +719,7 @@ class BaseAgent(ABC):
                 }
 
         # ── 初始状态 ──
-        bl_initial = {k: dict(v) for k, v in bl_models.items()}  # 保存初始基线，用于最终汇总
+        bl_initial = {k: dict(v) for k, v in bl_models.items()}
         print("初始状态:")
         has_data = False
         for mn, mv in bl_models.items():
@@ -714,15 +728,14 @@ class BaseAgent(ABC):
             if self._has_live_context:
                 cw = detect_context(mn)
                 pct = round(total / cw * 100, 1) if cw else 0
-                parts.append(f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})")
+                parts.append(_progress_bar(pct))
+                parts.append(f"{fmt_num(total)}/{fmt_num(cw)}")
             else:
                 parts.append(f"总计 {fmt_num(total)}")
-            parts.extend([
-                f"输入 {fmt_num(mv['input'])} tokens",
-                f"输出 {fmt_num(mv['output'])} tokens"
-            ])
+            parts.append(f"入 {fmt_num(mv['input'])}")
+            parts.append(f"出 {fmt_num(mv['output'])}")
             if mv.get("cache", 0):
-                parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
+                parts.append(f"存 {fmt_num(mv['cache'])}")
             parts.append(f"调用 {mv['calls']}")
             print(f"  {mn} | {' | '.join(parts)}")
             has_data = True
@@ -779,7 +792,6 @@ class BaseAgent(ABC):
                 elif d_tok < 0 or d_calls < 0:
                     bl_models[mn] = mv
 
-            # 每个 tick 合并显示：增量/累计（一行完成）
             ts = datetime.now().strftime("%H:%M:%S")
             any_delta = bool(changed_models)
             if any_delta:
@@ -793,10 +805,9 @@ class BaseAgent(ABC):
                 elif total_delta_calls < 0:
                     summary_parts.append(f"{total_delta_calls} 调用")
                 print(f"── [{ts}] {' '.join(summary_parts)} ──")
-            else:
-                print(f"── [{ts}] 无变化 ──")
 
-            if any_delta:
+                # 增量行
+                print("  ╌" * 20)
                 for mn, mv in now_models.items():
                     bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
                     d_in = mv["input"] - bl["input"]
@@ -811,45 +822,62 @@ class BaseAgent(ABC):
                     if self._has_live_context:
                         cw = detect_context(mn)
                         pct = round(total / cw * 100, 1) if cw else 0
-                        parts.append(f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})")
+                        parts.append(_progress_bar(pct))
+                        parts.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                     else:
                         parts.append(f"总计 {fmt_num(total)}")
 
                     if has_delta:
-                        parts.append(f"输入 +{fmt_num(d_in)}/{fmt_num(mv['input'])} tokens")
-                        parts.append(f"输出 +{fmt_num(d_out)}/{fmt_num(mv['output'])} tokens")
+                        parts.append(f"+{fmt_num(d_in)}入/{fmt_num(mv['input'])}")
+                        parts.append(f"+{fmt_num(d_out)}出/{fmt_num(mv['output'])}")
                         if d_cache or mv.get("cache", 0):
-                            parts.append(f"缓存 +{fmt_num(d_cache)}/{fmt_num(mv.get('cache', 0))} tokens")
-                        parts.append(f"调用 +{d_calls}/{mv['calls']}")
+                            parts.append(f"+{fmt_num(d_cache)}存/{fmt_num(mv.get('cache', 0))}")
+                        parts.append(f"+{d_calls}调用")
                     else:
-                        parts.append(f"输入 {fmt_num(mv['input'])} tokens")
-                        parts.append(f"输出 {fmt_num(mv['output'])} tokens")
+                        parts.append(f"入 {fmt_num(mv['input'])}")
+                        parts.append(f"出 {fmt_num(mv['output'])}")
                         if mv.get("cache", 0):
-                            parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
+                            parts.append(f"存 {fmt_num(mv['cache'])}")
                         parts.append(f"调用 {mv['calls']}")
 
                     print(f"  {mn} | {' | '.join(parts)}")
-
-                    # 更新基线
                     if has_delta:
                         bl_models[mn] = mv
+                print("  ╌" * 20)
 
-            # 📅 今日合计（每次有变化时刷新）
-            if any_delta:
+                # 📅 今日合计
                 try:
                     today_data = self.collect(from_ts=today_start)
-                    today_lines = fmt_today_lines(today_data.per_model or (
-                        [{
-                            "model": today_data.stats.get("model", "?"),
-                            "input": today_data.stats.get("input_tokens", 0),
-                            "output": today_data.stats.get("output_tokens", 0),
-                            "cache": today_data.stats.get("cache_read", 0),
-                            "calls": today_data.stats.get("api_calls", 0),
-                        }] if today_data.stats else []), fmt_num)
-                    for line in today_lines:
-                        print(line)
+                    print(f"  ╌╌╌╌╌ 📅 今日 ╌╌╌╌╌")
+                    ti = to = tc = tca = 0
+                    today_models = today_data.per_model or []
+                    for pm in today_models:
+                        m = pm.get("model", "?")
+                        i = pm.get("input", 0) or 0
+                        o = pm.get("output", 0) or 0
+                        c = pm.get("cache", 0) or 0
+                        ca = pm.get("calls", 0) or 0
+                        if i == 0 and o == 0 and ca == 0:
+                            continue
+                        ti += i; to += o; tc += c; tca += ca
+                        t = i + o
+                        parts = [f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
+                        if c:
+                            parts.append(f"存 {fmt_num(c)}")
+                        parts.append(f"调用 {ca}")
+                        print(f"  {m} | {' | '.join(parts)}")
+                    if len(today_models) > 1:
+                        t = ti + to
+                        sum_parts = [f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}", f"总计 {fmt_num(t)}"]
+                        if tc:
+                            sum_parts.append(f"存 {fmt_num(tc)}")
+                        sum_parts.append(f"调用 {tca}")
+                        print(f"  今日合计 | {' | '.join(sum_parts)}")
+                    print("  ╌" * 20)
                 except Exception:
                     pass
+            else:
+                print(f"── [{ts}] ... ──")
 
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
@@ -871,31 +899,56 @@ class BaseAgent(ABC):
                 if self._has_live_context:
                     cw = detect_context(mn)
                     pct = round(total / cw * 100, 1) if cw else 0
-                    parts.append(f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})")
+                    parts.append(_progress_bar(pct))
+                    parts.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                 else:
                     parts.append(f"总计 {fmt_num(total)}")
-                parts.extend([f"输入 {fmt_num(mv['input'])} tokens",
-                              f"输出 {fmt_num(mv['output'])} tokens"])
+                parts.extend([f"入 {fmt_num(mv['input'])}", f"出 {fmt_num(mv['output'])}"])
                 if mv.get("cache", 0):
-                    parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
+                    parts.append(f"存 {fmt_num(mv['cache'])}")
                 parts.append(f"调用 {mv['calls']}")
                 print(f"  {mn} | {' | '.join(parts)}")
 
             # 📅 今日累计
             try:
                 today_data = self.collect(from_ts=today_start)
-                today_lines = fmt_today_lines(today_data.per_model or (
-                    [{
-                        "model": today_data.stats.get("model", "?"),
-                        "input": today_data.stats.get("input_tokens", 0),
-                        "output": today_data.stats.get("output_tokens", 0),
-                        "cache": today_data.stats.get("cache_read", 0),
-                        "calls": today_data.stats.get("api_calls", 0),
-                    }] if today_data.stats else []), fmt_num)
-                if today_lines:
-                    print(f"  📅 今日累计:")
-                    for line in today_lines:
-                        print(line)
+                ti = to = tc = tca = 0
+                today_models = today_data.per_model or []
+                today_has = False
+                for pm in today_models:
+                    m = pm.get("model", "?")
+                    i = pm.get("input", 0) or 0
+                    o = pm.get("output", 0) or 0
+                    c = pm.get("cache", 0) or 0
+                    ca = pm.get("calls", 0) or 0
+                    if i == 0 and o == 0 and ca == 0:
+                        continue
+                    today_has = True
+                if today_has:
+                    print(f"\n  ╌╌╌╌╌ 📅 今日累计 ╌╌╌╌╌")
+                    for pm in today_models:
+                        m = pm.get("model", "?")
+                        i = pm.get("input", 0) or 0
+                        o = pm.get("output", 0) or 0
+                        c = pm.get("cache", 0) or 0
+                        ca = pm.get("calls", 0) or 0
+                        if i == 0 and o == 0 and ca == 0:
+                            continue
+                        ti += i; to += o; tc += c; tca += ca
+                        t = i + o
+                        parts = [f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
+                        if c:
+                            parts.append(f"存 {fmt_num(c)}")
+                        parts.append(f"调用 {ca}")
+                        print(f"  {m} | {' | '.join(parts)}")
+                    if len(today_models) > 1:
+                        t = ti + to
+                        sum_parts = [f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}", f"总计 {fmt_num(t)}"]
+                        if tc:
+                            sum_parts.append(f"存 {fmt_num(tc)}")
+                        sum_parts.append(f"调用 {tca}")
+                        print(f"  今日合计 | {' | '.join(sum_parts)}")
+                    print("  ╌" * 20)
             except Exception:
                 pass
 
@@ -913,27 +966,28 @@ class BaseAgent(ABC):
                 total_d_in += d_in; total_d_out += d_out
                 total_d_tok += d_tok; total_d_cache += d_cache; total_d_calls += d_calls
                 if d_tok > 0 or d_cache > 0 or d_calls > 0:
-                    parts = [f"总计 +{fmt_num(d_tok)}",
-                             f"输入 +{fmt_num(d_in)}",
-                             f"输出 +{fmt_num(d_out)}"]
+                    parts = [f"+{fmt_num(d_tok)}总计",
+                             f"+{fmt_num(d_in)}入",
+                             f"+{fmt_num(d_out)}出"]
                     if d_cache:
-                        parts.append(f"缓存 +{fmt_num(d_cache)}")
-                    parts.append(f"+{d_calls} 调用")
+                        parts.append(f"+{fmt_num(d_cache)}存")
+                    parts.append(f"+{d_calls}调用")
                     delta_lines.append(f"  {mn} | {' | '.join(parts)}")
 
             if delta_lines:
                 print(f"\n  监控期间增量:")
+                print("  ╌" * 20)
                 for dl in delta_lines:
                     print(dl)
                 if len(delta_lines) > 1:
-                    print(f"  {'─' * 50}")
-                    sum_parts = [f"总计 +{fmt_num(total_d_tok)}",
-                                 f"输入 +{fmt_num(total_d_in)}",
-                                 f"输出 +{fmt_num(total_d_out)}"]
+                    sum_parts = [f"+{fmt_num(total_d_tok)}总计",
+                                 f"+{fmt_num(total_d_in)}入",
+                                 f"+{fmt_num(total_d_out)}出"]
                     if total_d_cache:
-                        sum_parts.append(f"缓存 +{fmt_num(total_d_cache)}")
-                    sum_parts.append(f"+{total_d_calls} 调用")
-                    print(f"  合计 | {' | '.join(sum_parts)}")
+                        sum_parts.append(f"+{fmt_num(total_d_cache)}存")
+                    sum_parts.append(f"+{total_d_calls}调用")
+                    print(f"  增量合计 | {' | '.join(sum_parts)}")
+                print("  ╌" * 20)
         else:
             print("  监控期间无数据")
         print("👋 监控已停止")
@@ -1863,26 +1917,29 @@ def get_agent(name: str) -> BaseAgent:
 #  交互式菜单
 # ═══════════════════════════════════════════════════
 
-def show_menu(installed: list[type[BaseAgent]]) -> BaseAgent:
+def show_menu(installed: list[type[BaseAgent]]):
+    """交互式菜单。返回 BaseAgent 实例 / 'all' / None(退出)。"""
     print("\n🔍 选择你要查看的 AI 助手：")
     print("─" * 40)
     for i, cls in enumerate(installed, 1):
         print(f"  [{i}] {cls.display_name()}")
+    print("  [a] 所有")
     print("  [q] 退出")
     print("─" * 40)
 
     while True:
         try:
-            choice = input("请选择 (1-{})：".format(len(installed))).strip().lower()
+            choice = input("请选择：").strip().lower()
             if choice == "q":
-                print("再见 👋")
-                sys.exit(0)
+                return None
+            if choice == "a":
+                return "all"
             idx = int(choice) - 1
             if 0 <= idx < len(installed):
                 return installed[idx]()
-            print(f"请输入 1-{len(installed)} 或 q")
+            print(f"请输入 1-{len(installed)}、a 或 q")
         except (ValueError, EOFError):
-            print(f"请输入 1-{len(installed)} 或 q")
+            print(f"请输入 1-{len(installed)}、a 或 q")
 
 
 # ═══════════════════════════════════════════════════
@@ -2785,6 +2842,12 @@ def main():
         print(f"\n（本机仅安装了 {agent.display_name()}，直接显示统计）")
     else:
         agent = show_menu(installed)
+        if agent == "all":
+            show_all(from_ts=from_ts, to_ts=to_ts)
+            return
+        if agent is None:
+            print("再见 👋")
+            return
 
     # ── --compare (对比) ──
     if args.compare:
