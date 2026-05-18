@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -1007,10 +1007,11 @@ class ClaudeCodeAgent(BaseAgent):
             proj_dir = os.path.join(projects_dir, proj)
             if not os.path.isdir(proj_dir):
                 continue
-            for fname in os.listdir(proj_dir):
-                if fname.endswith(".jsonl") and not fname.endswith(".trajectory.jsonl"):
-                    fpath = os.path.join(proj_dir, fname)
-                    sessions.append((proj, fname, fpath))
+            for root, _dirs, files in os.walk(proj_dir):
+                for fname in files:
+                    if fname.endswith(".jsonl") and not fname.endswith(".trajectory.jsonl"):
+                        fpath = os.path.join(root, fname)
+                        sessions.append((proj, fname, fpath))
         return sorted(sessions, key=lambda x: os.path.getmtime(x[2]), reverse=True)
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
@@ -1089,7 +1090,6 @@ class ClaudeCodeAgent(BaseAgent):
             md = per_model_data[mn]
             line = format_model_line(
                 mn, md["input"], md["output"], md["cache"], md["calls"],
-                extra=f"子代理 {total_sub}" if total_sub > 0 and len(meaningful_models) <= 3 else None
             )
             if line:
                 raw_lines.append(line)

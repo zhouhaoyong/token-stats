@@ -152,7 +152,7 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.3.1
+# 输出: token-stats v2.3.2
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
