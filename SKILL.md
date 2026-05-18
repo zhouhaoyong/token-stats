@@ -1,7 +1,7 @@
 ---
 name: agent-usage-stats
 description: "选择要监控的 AI 助手 → 查看 token 消耗。支持 Hermes / Claude Code / CodeX / OpenClaw，每次都让你选"
-version: 2.2.2
+version: 2.2.3
 author: zhouhaoyong
 license: MIT
 source: https://github.com/zhouhaoyong/token-stats
