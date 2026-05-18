@@ -26,7 +26,7 @@ With plenty of log viewers out there, why pick this one?
 | **📅 Compare periods** — did today burn more than yesterday? | `--today --compare --a today --b yesterday` | Any time range aggregation, side-by-side comparison with diff. Trends at a glance |
 | **💾 Export** — save stats for records | `--export` | Interactive directory + format selection (JSON/CSV). Cross-platform paths |
 
-**Zero dependencies** — pure Python stdlib, no pip install needed. macOS / Linux supported.
+**Zero dependencies** — pure Python stdlib, no pip install needed. macOS / Linux / Windows supported.
 
 ---
 
@@ -80,22 +80,33 @@ clawhub --version   # should show v0.9.x
 
 ## Install
 
-```bash
-# Step 1: Install from ClawHub
-clawhub install agent-usage-stats
+After meeting the requirements above, two commands:
 
-# Step 2: Create the global command (auto-detect install path)
-TOKEN_STATS=$(find ~ -maxdepth 5 -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null | head -1) && python3 "$TOKEN_STATS" setup
+**macOS / Linux:**
+```bash
+cd ~
+clawhub install agent-usage-stats
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
-That's it. Run `token-stats --version` to verify. If the command isn't found, see: [Install path troubleshooting](#setup-not-found).
+**Windows (PowerShell):**
+```powershell
+cd ~
+clawhub install agent-usage-stats
+python ~\skills\agent-usage-stats\token-stats.py setup
+```
+
+> `cd ~` ensures the skill installs to your home directory (always writable on all OSes).
+> If `python` is not found, try `python3` (Microsoft Store Python uses `python3`).
+
+That's it. Run `token-stats` from any terminal.
 
 ### Verify Installation
 
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.2.5
+# Output: token-stats v2.2.7
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -116,25 +127,24 @@ If all three checks produce output, installation is successful 🎉
 
 ## Updating
 
+**macOS / Linux:**
 ```bash
-# Pull the latest version from ClawHub
 clawhub update agent-usage-stats
-
-# Re-run setup (needed if the script changed)
 python3 ~/skills/agent-usage-stats/token-stats.py setup
-
-# Verify version
 token-stats --version
 ```
 
-> 💡 It's recommended to re-run `setup` after every update so the global command stays current.
-> If `clawhub update` doesn't change the version, use `--force`:
-> ```bash
+**Windows (PowerShell):**
+```powershell
+clawhub update agent-usage-stats
+python ~\skills\agent-usage-stats\token-stats.py setup
+token-stats --version
+```
+
+> 💡 Re-run `setup` after each update. If the version doesn't change, use `--force`:
+> ```
 > clawhub install agent-usage-stats --force
 > ```
-
-> ⚠️ ClawHub installs skills into a `skills/` folder under your **current working directory**.
-> Run `clawhub install` from `~` or `~/.hermes/` to keep things tidy.
 
 ---
 
@@ -379,18 +389,22 @@ Example output (multiple models, per-model today totals + total row):
 - Whether the context window is nearly full (>90% 🚨), before the model silently drops older messages
 - Summary of total consumption during the monitoring session
 
-**Why this matters if you never `/new`:**
+**Why this matters if you never start a fresh session:**
 
 Running without ever starting a fresh session won't crash the model, but has three real costs:
 
-1. **Cost per round skyrockets** — at 800K context each round sends ~800K input tokens; 10 rounds can cost $1+. After `/new`, each round sends just a few K — nearly free
+1. **Cost per round skyrockets** — at 800K context each round sends ~800K input tokens; 10 rounds can cost $1+. After a fresh session, each round sends just a few K — nearly free
 2. **Response gets slower** — processing 1M context is much slower than 100K; you'll feel the delay before the first character appears
 3. **Model silently forgets** — past the context limit, the oldest messages are quietly dropped with **zero warning**. Ask "remember what we said earlier?" and the model may confidently fabricate an answer
 
 > 💡 **Recommended strategy**:
-> - Above **60%** → try `/compact` first (compresses context, keeps the gist, faster than `/new`)
-> - Above **90%** → `/compact` or `/new` strongly recommended
-> - Carry key info (preferences, project structure, config) via memory or notes
+> - Above **60%** → type `/compact` (compresses context, faster than `/new`, retains key info)
+> - Above **90%** → type `/new` (clears context, starts fresh)
+>
+> These commands work **across all platforms** (CLI, IDE plugins, chat apps like QQ/DingTalk all support slash commands).
+> IDE plugins also provide toolbar buttons ("Compact" / "New Chat") with the same effect.
+>
+> Carry key info (preferences, project structure, config) via memory or notes — don't rely on context alone.
 
 ### See what's installed
 
@@ -530,6 +544,7 @@ Prefix matching is supported: `claude-opus-4-7-20250219` → 200K, `gpt-4.1-prev
 
 ## Uninstall
 
+**macOS / Linux:**
 ```bash
 clawhub uninstall agent-usage-stats
 rm -f ~/.local/bin/token-stats
@@ -537,9 +552,15 @@ rm -f ~/.local/bin/token-stats
 # Clean up old aliases (if you previously set alias token-stats=...)
 grep "alias token-stats" ~/.zshrc ~/.bashrc 2>/dev/null || echo "No old aliases found"
 
-# If any found, remove them:
-sed -i '' '/alias token-stats/d' ~/.zshrc
+# If any found, remove them (macOS: sed -i '', Linux: sed -i)
+sed -i '' '/alias token-stats/d' ~/.zshrc 2>/dev/null || sed -i '/alias token-stats/d' ~/.zshrc
 source ~/.zshrc
+```
+
+**Windows (PowerShell):**
+```powershell
+clawhub uninstall agent-usage-stats
+Remove-Item -Force ~\.local\bin\token-stats.cmd
 ```
 
 ---
@@ -550,7 +571,7 @@ source ~/.zshrc
 |----------|--------|
 | macOS | ✅ Full support |
 | Linux | ✅ Full support |
-| Windows | ⬜ Planned (PRs welcome) |
+| Windows | ✅ Supported (`.cmd` wrapper) |
 
 | Requirement | Details |
 |-------------|---------|
@@ -581,47 +602,65 @@ npm install -g clawhub --registry=https://registry.npmmirror.com
 <a id="setup-not-found"></a>
 #### ❓ Install path troubleshooting
 
-**When: `python3 ~/skills/.../token-stats.py setup` fails with file not found.**
+**When: `setup` fails with file not found.**
 
-**Cause 1: OpenClaw workspace detected** → ClawHub installed to `~/.openclaw/workspace/skills/agent-usage-stats/`
+**Cause: `clawhub install` was run from a different directory (not home).** Skills are placed under `./skills/` relative to the working directory.
 
-**Cause 2: ClawHub installed to a different working directory** → skills are placed in `./skills/` relative to the `clawhub install` working directory.
-
+**Fix:**
 ```bash
-# Find where token-stats.py actually is
-find ~ -name "token-stats.py" -type f 2>/dev/null
-
-# Once found, cd to that directory and setup from there, or reinstall from ~:
 cd ~
-clawhub install agent-usage-stats
-python3 ~/skills/agent-usage-stats/token-stats.py setup
+clawhub install agent-usage-stats --force
 ```
+
+Then follow the install steps above. The home directory (`~`) is always writable on all OSes.
 
 #### ❓ `token-stats` command not found
 
 **Cause: `~/.local/bin/` is not in PATH.**
 
+**macOS (default zsh):**
 ```bash
-# Check
 echo $PATH | grep .local/bin
-
-# If empty, add it:
+# If not found:
 echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.zshrc
 source ~/.zshrc
-
-# Or run directly
+# Or run directly:
 ~/.local/bin/token-stats --version
+```
+
+**Linux (default bash):**
+```bash
+echo $PATH | grep .local/bin
+# If not found:
+echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+source ~/.bashrc
+# Or run directly:
+~/.local/bin/token-stats --version
+```
+
+**Windows (PowerShell):**
+```powershell
+# Check
+$env:PATH -split ';' | Select-String '.local'
+# If not found, add for current session:
+$env:PATH += ';' + "$env:USERPROFILE\.local\bin"
+# Or permanently (as admin):
+[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';' + "$env:USERPROFILE\.local\bin", 'User')
+# Or run directly:
+& "$env:USERPROFILE\.local\bin\token-stats.cmd" --version
 ```
 
 #### ❓ `Permission denied` when running `token-stats`
 
-**Cause: wrapper script lacks execute permission.**
+**macOS / Linux only. Cause: wrapper script lacks execute permission.**
 
 ```bash
 chmod +x ~/.local/bin/token-stats
 # Or just re-run setup
 python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
+
+> Windows users are not affected (`.cmd` files don't need execute permission).
 
 ### Runtime issues
 
@@ -654,6 +693,11 @@ Run `token-stats --list-backends` to see what's detected.
 sqlite3 ~/.hermes/state.db "SELECT DISTINCT model FROM sessions WHERE model IS NULL OR model = ''"
 ```
 
+> Windows users without `sqlite3` can use Python instead:
+> ```powershell
+> python3 -c "import sqlite3; c=sqlite3.connect(r'$env:USERPROFILE\.hermes\state.db'); print('\n'.join(r[0] or '(NULL)' for r in c.execute('SELECT DISTINCT model FROM sessions WHERE model IS NULL OR model = \"\"')))"
+> ```
+
 #### ❓ Export says "directory not found"
 
 **Cause: the directory path you entered doesn't exist.** Create it first:
@@ -666,31 +710,17 @@ token-stats -b hermes --export
 
 #### ❓ Install successful but `token-stats` command not found
 
-**Cause:** `clawhub install` placed the files in a non-standard location, but you ran `setup` from `~/skills/` which doesn't exist.
+**Cause:** `clawhub install` was run from a directory other than home, or your system has `~/.openclaw/` (which redirects ClawHub's install target).
 
-This is common when **`~/.openclaw/` exists** — ClawHub auto-detects the workspace and installs to `~/.openclaw/workspace/skills/agent-usage-stats/` instead of `~/skills/`.
-
-**Diagnose:**
+**Fix for all OSes:**
 ```bash
-find ~ -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null
-```
-
-**Fix:**
-```bash
-# Run setup from the actual location
-python3 /path/to/agent-usage-stats/token-stats.py setup
-
-# Then token-stats becomes available
+cd ~
+clawhub install agent-usage-stats --force
+python3 ~/skills/agent-usage-stats/token-stats.py setup   # Windows: python ~\skills\...
 token-stats --version
 ```
 
-To relocate to `~/skills/` instead:
-```bash
-clawhub uninstall agent-usage-stats
-cd /tmp && clawhub install agent-usage-stats
-cp -r /tmp/skills/agent-usage-stats ~/skills/
-python3 ~/skills/agent-usage-stats/token-stats.py setup
-```
+This ensures the skill is installed to `~/skills/` — the predictable home-directory location.
 
 #### ❓ OpenClaw shows calls but zero tokens
 

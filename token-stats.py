@@ -34,6 +34,8 @@ token-stats — 选个 Agent 看它的 token 消耗
   token-stats setup              创建 ~/.local/bin/token-stats
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -49,10 +51,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.2.6"
+VERSION = "2.2.7"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
-sys.stdout.reconfigure(line_buffering=True, encoding="utf-8")
+try:
+    sys.stdout.reconfigure(line_buffering=True, encoding="utf-8")
+except Exception:
+    pass
 
 # ── 路径配置系统 ──
 # 支持 setup 时自动检测 Agent 路径，保存到配置文件
@@ -2091,36 +2096,45 @@ def main():
 
     # ── setup ──
     if args.setup:
-        target = os.path.join(os.path.expanduser("~"), ".local", "bin", "token-stats")
+        is_win = sys.platform == "win32"
+        bin_dir = os.path.join(os.path.expanduser("~"), ".local", "bin")
         script_path = os.path.abspath(__file__)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
+        os.makedirs(bin_dir, exist_ok=True)
 
-        wrapper = (
-            "#!/bin/sh\n"
-            f'exec python3 "{script_path}" "$@"\n'
-        )
-        with open(target, "w", encoding="utf-8") as f:
-            f.write(wrapper)
-        os.chmod(target, 0o755)
+        if is_win:
+            target = os.path.join(bin_dir, "token-stats.cmd")
+            wrapper = f'@python "{script_path}" %*\n'
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(wrapper)
+        else:
+            target = os.path.join(bin_dir, "token-stats")
+            wrapper = (
+                "#!/bin/sh\n"
+                f'exec python3 "{script_path}" "$@"\n'
+            )
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(wrapper)
+            os.chmod(target, 0o755)
 
         print(f"✅ 已创建全局命令: {target}")
         print(f"   → 每次执行都调用: python3 {script_path}")
 
-        for rc_file in ["~/.zshrc", "~/.bashrc", "~/.bash_profile"]:
-            rc_path = os.path.expanduser(rc_file)
-            if os.path.exists(rc_path):
-                with open(rc_path, encoding="utf-8") as f:
-                    content = f.read()
-                alias_lines = []
-                for i, line in enumerate(content.splitlines(), 1):
-                    if "alias token-stats" in line.strip():
-                        alias_lines.append(f"  {rc_file} 第 {i} 行: {line.strip()}")
-                if alias_lines:
-                    print()
-                    print("⚠️  检测到旧的 alias，会覆盖全局命令，建议删除：")
-                    for al in alias_lines:
-                        print(al)
-                    print("   删除方法: 手动编辑或用 sed 删除对应行，然后 source ~/.zshrc")
+        if not is_win:
+            for rc_file in ["~/.zshrc", "~/.bashrc", "~/.bash_profile"]:
+                rc_path = os.path.expanduser(rc_file)
+                if os.path.exists(rc_path):
+                    with open(rc_path, encoding="utf-8") as f:
+                        content = f.read()
+                    alias_lines = []
+                    for i, line in enumerate(content.splitlines(), 1):
+                        if "alias token-stats" in line.strip():
+                            alias_lines.append(f"  {rc_file} 第 {i} 行: {line.strip()}")
+                    if alias_lines:
+                        print()
+                        print("⚠️  检测到旧的 alias，会覆盖全局命令，建议删除：")
+                        for al in alias_lines:
+                            print(al)
+                        print("   删除方法: 手动编辑或用 sed 删除对应行，然后 source ~/.zshrc")
 
         # ── 扫描并保存 Agent 数据路径 ──
         agent_paths = _scan_all_agent_paths()
@@ -2134,11 +2148,19 @@ def main():
         else:
             print("ℹ️  未检测到任何 Agent 数据文件，运行后会自动尝试标准路径")
 
-        bin_dir = os.path.dirname(target)
         if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
-            print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
-            print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.zshrc")
-            print(f"   source ~/.zshrc")
+            if is_win:
+                print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到系统 PATH:")
+                print(f"   PowerShell (当前会话): $env:PATH += ';{bin_dir}'")
+                print(f"   永久添加: [Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';{bin_dir}', 'User')")
+            elif sys.platform == "darwin":
+                print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
+                print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.zshrc")
+                print(f"   source ~/.zshrc")
+            else:
+                print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
+                print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.bashrc")
+                print(f"   source ~/.bashrc")
         return
 
     # ── list-backends ──
