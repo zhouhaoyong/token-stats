@@ -280,13 +280,21 @@ def _scan_all_agent_paths() -> dict:
 #  工具函数
 # ═══════════════════════════════════════════════════
 
+def _fmt_float(v: float) -> str:
+    """保留最多 2 位小数，去掉尾部多余的零。"""
+    s = f"{v:.2f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
+
 def fmt_num(n: int) -> str:
     if abs(n) < 1000:
         return str(n)
     elif abs(n) < 1_000_000:
-        return f"{n/1000:.1f}K"
+        return f"{_fmt_float(n/1000)}K"
     else:
-        return f"{n/1_000_000:.2f}M"
+        return f"{_fmt_float(n/1_000_000)}M"
 
 
 def fmt_pct(pct: float) -> str:
@@ -414,6 +422,7 @@ MODEL_CONTEXT_MAP = {
     "mistral-small": 131_072,
 
     # ── 通义千问 / Qwen ──
+    "qwen3.6-plus": 1_048_576,
     "qwen3": 131_072,
     "qwen3-coder": 131_072,
     "qwen2.5-coder": 131_072,
@@ -569,6 +578,44 @@ def _pad_to(s: str, width: int, align: str = "<") -> str:
         return s + " " * pad
 
 
+def _strip_ansi(s: str) -> str:
+    """移除 ANSI 转义序列，用于显示宽度计算。"""
+    return re.sub(r'\033\[[0-9;]*m', '', s)
+
+
+def _pad_ansi(s: str, width: int, align: str = "<") -> str:
+    """按可见宽度填充（忽略 ANSI 码）。"""
+    dw = _display_width(_strip_ansi(s))
+    pad = max(0, width - dw)
+    if align == ">":
+        return " " * pad + s
+    else:
+        return s + " " * pad
+
+
+def _align_rows(rows):
+    """rows: list of list of str。每列按最大宽度左对齐，最后一列不补。"""
+    if not rows:
+        return rows
+    n_cols = max(len(r) for r in rows)
+    widths = [0] * n_cols
+    for row in rows:
+        for i, col in enumerate(row):
+            w = _display_width(_strip_ansi(col))
+            if w > widths[i]:
+                widths[i] = w
+    result = []
+    for row in rows:
+        padded = []
+        for i, col in enumerate(row):
+            if i < n_cols - 1:
+                padded.append(_pad_ansi(col, widths[i], '<'))
+            else:
+                padded.append(col)
+        result.append(padded)
+    return result
+
+
 def label_to_display(label: str) -> str:
     """将时间标签转为人类可读的日期字符串，用于对比模式列头。"""
     s = label.strip().lower()
@@ -722,23 +769,29 @@ class BaseAgent(ABC):
         bl_initial = {k: dict(v) for k, v in bl_models.items()}
         print("初始状态:")
         has_data = False
-        for mn, mv in bl_models.items():
-            total = mv["input"] + mv["output"]
-            parts = []
-            if self._has_live_context:
-                cw = detect_context(mn)
-                pct = round(total / cw * 100, 1) if cw else 0
-                parts.append(_progress_bar(pct))
-                parts.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-            else:
-                parts.append(f"总计 {fmt_num(total)}")
-            parts.append(f"入 {fmt_num(mv['input'])}")
-            parts.append(f"出 {fmt_num(mv['output'])}")
-            if mv.get("cache", 0):
-                parts.append(f"存 {fmt_num(mv['cache'])}")
-            parts.append(f"调用 {mv['calls']}")
-            print(f"  {mn} | {' | '.join(parts)}")
-            has_data = True
+        has_cache = any(mv.get("cache", 0) for mv in bl_models.values())
+        if bl_models:
+            init_rows = []
+            for mn, mv in bl_models.items():
+                total = mv["input"] + mv["output"]
+                cols = [mn]
+                if self._has_live_context:
+                    cw = detect_context(mn)
+                    pct = round(total / cw * 100, 1) if cw else 0
+                    cols.append(_progress_bar(pct))
+                    cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
+                else:
+                    cols.append(f"总计 {fmt_num(total)}")
+                cols.append(f"入 {fmt_num(mv['input'])}")
+                cols.append(f"出 {fmt_num(mv['output'])}")
+                if has_cache:
+                    cols.append(f"存 {fmt_num(mv.get('cache', 0))}")
+                cols.append(f"调用 {mv['calls']}")
+                init_rows.append(cols)
+                has_data = True
+            aligned = _align_rows(init_rows)
+            for row in aligned:
+                print(f"  {' | '.join(row)}")
         if not has_data:
             print("  (暂无数据，等待会话开始...)")
         print()
@@ -808,6 +861,13 @@ class BaseAgent(ABC):
 
                 # 增量行
                 print("  ╌" * 20)
+                # 先检查是否有任何模型有缓存数据（保证列一致）
+                any_cache_now = any(
+                    mv.get("cache", 0) or (mv.get("cache", 0) - bl_models.get(mn, {}).get("cache", 0))
+                    for mn, mv in now_models.items()
+                )
+                delta_rows = []
+                idle_models = []
                 for mn, mv in now_models.items():
                     bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
                     d_in = mv["input"] - bl["input"]
@@ -816,33 +876,45 @@ class BaseAgent(ABC):
                     d_cache = mv.get("cache", 0) - bl.get("cache", 0)
                     d_calls = mv["calls"] - bl["calls"]
                     has_delta = d_tok > 0 or d_cache > 0 or d_calls > 0
-
                     total = mv["input"] + mv["output"]
-                    parts = []
+
+                    if total == 0 and mv["calls"] == 0:
+                        idle_models.append(mn)
+                        bl_models[mn] = mv
+                        continue
+
+                    cols = [mn]
                     if self._has_live_context:
                         cw = detect_context(mn)
                         pct = round(total / cw * 100, 1) if cw else 0
-                        parts.append(_progress_bar(pct))
-                        parts.append(f"{fmt_num(total)}/{fmt_num(cw)}")
+                        cols.append(_progress_bar(pct))
+                        cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                     else:
-                        parts.append(f"总计 {fmt_num(total)}")
+                        cols.append(f"总计 {fmt_num(total)}")
 
                     if has_delta:
-                        parts.append(f"+{fmt_num(d_in)}入/{fmt_num(mv['input'])}")
-                        parts.append(f"+{fmt_num(d_out)}出/{fmt_num(mv['output'])}")
-                        if d_cache or mv.get("cache", 0):
-                            parts.append(f"+{fmt_num(d_cache)}存/{fmt_num(mv.get('cache', 0))}")
-                        parts.append(f"+{d_calls}调用")
+                        cols.append(f"+{fmt_num(d_in)}入/{fmt_num(mv['input'])}")
+                        cols.append(f"+{fmt_num(d_out)}出/{fmt_num(mv['output'])}")
+                        if any_cache_now:
+                            cols.append(f"+{fmt_num(d_cache)}存/{fmt_num(mv.get('cache', 0))}")
+                        cols.append(f"+{d_calls}调用")
                     else:
-                        parts.append(f"入 {fmt_num(mv['input'])}")
-                        parts.append(f"出 {fmt_num(mv['output'])}")
-                        if mv.get("cache", 0):
-                            parts.append(f"存 {fmt_num(mv['cache'])}")
-                        parts.append(f"调用 {mv['calls']}")
+                        cols.append(f"入 {fmt_num(mv['input'])}")
+                        cols.append(f"出 {fmt_num(mv['output'])}")
+                        if any_cache_now:
+                            cols.append(f"存 {fmt_num(mv.get('cache', 0))}")
+                        cols.append(f"调用 {mv['calls']}")
 
-                    print(f"  {mn} | {' | '.join(parts)}")
-                    if has_delta:
-                        bl_models[mn] = mv
+                    delta_rows.append((cols, has_delta, mn, mv))
+
+                if delta_rows:
+                    aligned = _align_rows([r[0] for r in delta_rows])
+                    for (cols, has_delta, mn, mv), aligned_cols in zip(delta_rows, aligned):
+                        print(f"  {' | '.join(aligned_cols)}")
+                        if has_delta:
+                            bl_models[mn] = mv
+                if idle_models:
+                    print(f"  (未使用: {', '.join(idle_models)})")
                 print("  ╌" * 20)
 
                 # 📅 今日合计
@@ -851,6 +923,8 @@ class BaseAgent(ABC):
                     print(f"  ╌╌╌╌╌ 📅 今日 ╌╌╌╌╌")
                     ti = to = tc = tca = 0
                     today_models = today_data.per_model or []
+                    today_rows = []
+                    today_has_cache = False
                     for pm in today_models:
                         m = pm.get("model", "?")
                         i = pm.get("input", 0) or 0
@@ -861,11 +935,20 @@ class BaseAgent(ABC):
                             continue
                         ti += i; to += o; tc += c; tca += ca
                         t = i + o
-                        parts = [f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
+                        cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
                         if c:
-                            parts.append(f"存 {fmt_num(c)}")
-                        parts.append(f"调用 {ca}")
-                        print(f"  {m} | {' | '.join(parts)}")
+                            today_has_cache = True
+                        cols.append(f"存 {fmt_num(c)}")
+                        cols.append(f"调用 {ca}")
+                        today_rows.append(cols)
+                    if today_rows:
+                        if not today_has_cache:
+                            # 去掉缓存列
+                            for row in today_rows:
+                                row.pop(-2)  # 移除缓存
+                        aligned = _align_rows(today_rows)
+                        for row in aligned:
+                            print(f"  {' | '.join(row)}")
                     if len(today_models) > 1:
                         t = ti + to
                         sum_parts = [f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}", f"总计 {fmt_num(t)}"]
@@ -877,7 +960,7 @@ class BaseAgent(ABC):
                 except Exception:
                     pass
             else:
-                print(f"── [{ts}] ... ──")
+                print(f"── [{ts}] 无新活动 ──")
 
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
@@ -893,28 +976,35 @@ class BaseAgent(ABC):
         # 最终累计状态
         if bl_models:
             print("  最终状态:")
+            final_has_cache = any(mv.get("cache", 0) for mv in bl_models.values())
+            final_rows = []
             for mn, mv in sorted(bl_models.items()):
                 total = mv["input"] + mv["output"]
-                parts = []
+                cols = [mn]
                 if self._has_live_context:
                     cw = detect_context(mn)
                     pct = round(total / cw * 100, 1) if cw else 0
-                    parts.append(_progress_bar(pct))
-                    parts.append(f"{fmt_num(total)}/{fmt_num(cw)}")
+                    cols.append(_progress_bar(pct))
+                    cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                 else:
-                    parts.append(f"总计 {fmt_num(total)}")
-                parts.extend([f"入 {fmt_num(mv['input'])}", f"出 {fmt_num(mv['output'])}"])
-                if mv.get("cache", 0):
-                    parts.append(f"存 {fmt_num(mv['cache'])}")
-                parts.append(f"调用 {mv['calls']}")
-                print(f"  {mn} | {' | '.join(parts)}")
+                    cols.append(f"总计 {fmt_num(total)}")
+                cols.append(f"入 {fmt_num(mv['input'])}")
+                cols.append(f"出 {fmt_num(mv['output'])}")
+                if final_has_cache:
+                    cols.append(f"存 {fmt_num(mv.get('cache', 0))}")
+                cols.append(f"调用 {mv['calls']}")
+                final_rows.append(cols)
+            aligned = _align_rows(final_rows)
+            for row in aligned:
+                print(f"  {' | '.join(row)}")
 
             # 📅 今日累计
             try:
                 today_data = self.collect(from_ts=today_start)
                 ti = to = tc = tca = 0
                 today_models = today_data.per_model or []
-                today_has = False
+                today_rows = []
+                today_has_cache = False
                 for pm in today_models:
                     m = pm.get("model", "?")
                     i = pm.get("input", 0) or 0
@@ -923,24 +1013,22 @@ class BaseAgent(ABC):
                     ca = pm.get("calls", 0) or 0
                     if i == 0 and o == 0 and ca == 0:
                         continue
-                    today_has = True
-                if today_has:
+                    ti += i; to += o; tc += c; tca += ca
+                    t = i + o
+                    cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
+                    if c:
+                        today_has_cache = True
+                    cols.append(f"存 {fmt_num(c)}")
+                    cols.append(f"调用 {ca}")
+                    today_rows.append(cols)
+                if today_rows:
                     print(f"\n  ╌╌╌╌╌ 📅 今日累计 ╌╌╌╌╌")
-                    for pm in today_models:
-                        m = pm.get("model", "?")
-                        i = pm.get("input", 0) or 0
-                        o = pm.get("output", 0) or 0
-                        c = pm.get("cache", 0) or 0
-                        ca = pm.get("calls", 0) or 0
-                        if i == 0 and o == 0 and ca == 0:
-                            continue
-                        ti += i; to += o; tc += c; tca += ca
-                        t = i + o
-                        parts = [f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
-                        if c:
-                            parts.append(f"存 {fmt_num(c)}")
-                        parts.append(f"调用 {ca}")
-                        print(f"  {m} | {' | '.join(parts)}")
+                    if not today_has_cache:
+                        for row in today_rows:
+                            row.pop(-2)
+                    aligned = _align_rows(today_rows)
+                    for row in aligned:
+                        print(f"  {' | '.join(row)}")
                     if len(today_models) > 1:
                         t = ti + to
                         sum_parts = [f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}", f"总计 {fmt_num(t)}"]
@@ -955,7 +1043,8 @@ class BaseAgent(ABC):
             # 总增量（最新累计 - 初始基线）
             total_d_tok = total_d_cache = total_d_calls = 0
             total_d_in = total_d_out = 0
-            delta_lines = []
+            any_d_cache = False
+            delta_data = []
             for mn, mv in sorted(bl_models.items()):
                 init = bl_initial.get(mn, {"input": 0, "output": 0, "cache": 0, "calls": 0})
                 d_in = mv["input"] - init["input"]
@@ -966,20 +1055,24 @@ class BaseAgent(ABC):
                 total_d_in += d_in; total_d_out += d_out
                 total_d_tok += d_tok; total_d_cache += d_cache; total_d_calls += d_calls
                 if d_tok > 0 or d_cache > 0 or d_calls > 0:
-                    parts = [f"+{fmt_num(d_tok)}总计",
-                             f"+{fmt_num(d_in)}入",
-                             f"+{fmt_num(d_out)}出"]
                     if d_cache:
-                        parts.append(f"+{fmt_num(d_cache)}存")
-                    parts.append(f"+{d_calls}调用")
-                    delta_lines.append(f"  {mn} | {' | '.join(parts)}")
+                        any_d_cache = True
+                    delta_data.append((mn, d_tok, d_in, d_out, d_cache, d_calls))
 
-            if delta_lines:
+            if delta_data:
                 print(f"\n  监控期间增量:")
                 print("  ╌" * 20)
-                for dl in delta_lines:
-                    print(dl)
-                if len(delta_lines) > 1:
+                inc_rows = []
+                for (mn, d_tok, d_in, d_out, d_cache, d_calls) in delta_data:
+                    cols = [mn, f"+{fmt_num(d_tok)}总计", f"+{fmt_num(d_in)}入", f"+{fmt_num(d_out)}出"]
+                    if any_d_cache:
+                        cols.append(f"+{fmt_num(d_cache)}存")
+                    cols.append(f"+{d_calls}调用")
+                    inc_rows.append(cols)
+                aligned = _align_rows(inc_rows)
+                for row in aligned:
+                    print(f"  {' | '.join(row)}")
+                if len(delta_data) > 1:
                     sum_parts = [f"+{fmt_num(total_d_tok)}总计",
                                  f"+{fmt_num(total_d_in)}入",
                                  f"+{fmt_num(total_d_out)}出"]
