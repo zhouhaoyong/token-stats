@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.2.1"
+VERSION = "2.2.2"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
 sys.stdout.reconfigure(line_buffering=True)
@@ -1023,8 +1023,16 @@ class CodeXAgent(BaseAgent):
 #  OpenClaw
 # ═══════════════════════════════════════════════════
 
-OPENCLAW_DIR = os.path.expanduser("~/ai-testing-lab/openclaw/data")
-OPENCLAW_SESSIONS = os.path.join(OPENCLAW_DIR, "agents", "main", "sessions", "sessions.json")
+def _find_openclaw_sessions() -> Optional[str]:
+    """检测 OpenClaw 会话数据文件，支持多种安装路径"""
+    candidates = [
+        os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
+        os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
 
 
 class OpenClawAgent(BaseAgent):
@@ -1038,16 +1046,17 @@ class OpenClawAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return os.path.exists(OPENCLAW_SESSIONS)
+        return _find_openclaw_sessions() is not None
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        if not os.path.exists(OPENCLAW_SESSIONS):
+        oc_path = _find_openclaw_sessions()
+        if oc_path is None:
             return AgentData(
                 name="openclaw", display_name="OpenClaw",
                 stats={}, raw="OpenClaw: 数据文件不存在"
             )
         try:
-            with open(OPENCLAW_SESSIONS, encoding="utf-8") as f:
+            with open(oc_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             agents = []
