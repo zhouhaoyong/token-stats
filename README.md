@@ -86,11 +86,12 @@ clawhub install agent-usage-stats
 
 # Step 2: Create the global command (setup writes a shell wrapper, no +x needed)
 python3 ~/skills/agent-usage-stats/token-stats.py setup
+# ⚠️ If this path doesn't exist, see → Install successful but command not found
 ```
 
 That's it. Now just type `token-stats` in your terminal.
 
-> ⚠️ **Trouble finding the command?** → see [Install successful but command not found](#-install-successful-but-token-stats-command-not-found) in troubleshooting.
+> ⚠️ **Trouble finding the command?** → see [Install successful but `token-stats` command not found](#-install-successful-but-token-stats-command-not-found) in troubleshooting.
 
 ### Verify Installation
 

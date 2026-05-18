@@ -132,6 +132,7 @@ clawhub install agent-usage-stats
 
 # 第 2 步：创建全局命令（setup 命令会自动写好包装器，不需修改脚本权限）
 python3 ~/skills/agent-usage-stats/token-stats.py setup
+# ⚠️ 如果报错文件不存在，见下方 → `python3 ~/skills/...` 提示文件不存在
 ```
 
 好了。以后在终端直接敲 `token-stats` 就能用。
