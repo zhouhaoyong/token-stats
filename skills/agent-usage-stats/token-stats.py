@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.7"
+VERSION = "2.3.8"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -2010,13 +2010,14 @@ def get_agent(name: str) -> BaseAgent:
 #  交互式菜单
 # ═══════════════════════════════════════════════════
 
-def show_menu(installed: list[type[BaseAgent]]):
+def show_menu(installed: list[type[BaseAgent]], *, allow_all: bool = True):
     """交互式菜单。返回 BaseAgent 实例 / 'all' / None(退出)。"""
     print("\n🔍 选择你要查看的 AI 助手：")
     print("─" * 40)
     for i, cls in enumerate(installed, 1):
         print(f"  [{i}] {cls.display_name()}")
-    print("  [a] 所有")
+    if allow_all:
+        print("  [a] 所有")
     print("  [q] 退出")
     print("─" * 40)
 
@@ -2025,14 +2026,22 @@ def show_menu(installed: list[type[BaseAgent]]):
             choice = input("请选择：").strip().lower()
             if choice == "q":
                 return None
-            if choice == "a":
+            if allow_all and choice == "a":
                 return "all"
             idx = int(choice) - 1
             if 0 <= idx < len(installed):
                 return installed[idx]()
-            print(f"请输入 1-{len(installed)}、a 或 q")
+            valid = f"1-{len(installed)}"
+            if allow_all:
+                valid += "、a"
+            valid += " 或 q"
+            print(f"请输入 {valid}")
         except (ValueError, EOFError):
-            print(f"请输入 1-{len(installed)}、a 或 q")
+            valid = f"1-{len(installed)}"
+            if allow_all:
+                valid += "、a"
+            valid += " 或 q"
+            print(f"请输入 {valid}")
 
 
 # ═══════════════════════════════════════════════════
@@ -2934,7 +2943,7 @@ def main():
         agent = installed[0]()
         print(f"\n（本机仅安装了 {agent.display_name()}，直接显示统计）")
     else:
-        agent = show_menu(installed)
+        agent = show_menu(installed, allow_all=args.watch is None)
         if agent == "all":
             show_all(from_ts=from_ts, to_ts=to_ts)
             return
