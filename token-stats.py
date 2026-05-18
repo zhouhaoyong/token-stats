@@ -4,30 +4,30 @@ token-stats — 选个 Agent 看它的 token 消耗
 
 用法:
   token-stats                    交互式菜单：选 Agent → 看统计
-  token-stats -b hermes          直接查看 Hermes
+  token-stats -a hermes          直接查看 Hermes
   token-stats --watch            交互式菜单 → 实时监控
   token-stats --all              查看本机所有 Agent 的统计
-  token-stats -b hermes --now    同默认（显式快照）
+  token-stats -a hermes --now    同默认（显式快照）
 
   时间段查询:
-  token-stats -b hermes --today
-  token-stats -b hermes --yesterday
-  token-stats -b hermes --week
-  token-stats -b hermes --last-7d
-  token-stats -b hermes --from 2025-01-01 --to 2025-01-31
+  token-stats -a hermes --today
+  token-stats -a hermes --yesterday
+  token-stats -a hermes --week
+  token-stats -a hermes --last-7d
+  token-stats -a hermes --from 2025-01-01 --to 2025-01-31
 
   导出:
-  token-stats -b hermes --export
-  token-stats -b hermes --today --export
+  token-stats -a hermes --export
+  token-stats -a hermes --today --export
 
   对比:
-  token-stats -b hermes --compare --a today --b yesterday
-  token-stats -b hermes --compare --a this-week --b last-week
-  token-stats -b hermes --compare --a 2025-01-01 --b 2025-01-15
-  token-stats -b hermes --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
+  token-stats -a hermes --compare --a today --b yesterday
+  token-stats -a hermes --compare --a this-week --b last-week
+  token-stats -a hermes --compare --a 2025-01-01 --b 2025-01-15
+  token-stats -a hermes --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
 
   详细模式:
-  token-stats -b hermes --detail
+  token-stats -a hermes --detail
 
 安装:
   clawhub install agent-usage-stats
@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.5"
+VERSION = "2.3.6"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -2491,32 +2491,32 @@ def main():
 命令大全:
   基础:
     token-stats                       交互式菜单选择 Agent → 查看统计
-    token-stats -b <name>             直接指定 Agent: hermes/claude-code/codex/openclaw
+    token-stats -a <name>             直接指定 Agent: hermes/claude-code/codex/openclaw
     token-stats --version             显示版本号
-    token-stats -b <name> --detail    详细模式（同默认）
-    token-stats -b <name> --now       当前快照（同默认）
+    token-stats -a <name> --detail    详细模式（同默认）
+    token-stats -a <name> --now       当前快照（同默认）
 
   快速时间段:
-    token-stats -b <name> --today     今日统计
-    token-stats -b <name> --yesterday 昨日统计
-    token-stats -b <name> --week      本周统计（周一起）
-    token-stats -b <name> --last-7d   最近 7 天
-    token-stats -b <name> --from 2025-01-01 --to 2025-01-31  自定义时间段
+    token-stats -a <name> --today     今日统计
+    token-stats -a <name> --yesterday 昨日统计
+    token-stats -a <name> --week      本周统计（周一起）
+    token-stats -a <name> --last-7d   最近 7 天
+    token-stats -a <name> --from 2025-01-01 --to 2025-01-31  自定义时间段
 
   对比:
-    token-stats -b <name> --compare --a today --b yesterday
+    token-stats -a <name> --compare --a today --b yesterday
         快捷标签对比
-    token-stats -b <name> --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
+    token-stats -a <name> --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
         自定义时间段对比
     标签支持: today / yesterday / this-week / last-week / YYYY-MM-DD / YYYY-MM-DD~YYYY-MM-DD
 
   导出:
-    token-stats -b <name> --export    导出当前统计（交互式选目录和格式）
-    token-stats -b <name> --today --export  导出今日统计
+    token-stats -a <name> --export    导出当前统计（交互式选目录和格式）
+    token-stats -a <name> --today --export  导出今日统计
 
   实时监控:
-    token-stats -b <name> --watch     实时监控，每 5 秒刷新 (Ctrl+C 停止)
-    token-stats -b <name> --watch 10  自定义间隔秒数
+    token-stats -a <name> --watch     实时监控，每 5 秒刷新 (Ctrl+C 停止)
+    token-stats -a <name> --watch 10  自定义间隔秒数
     停止后自动展示监控时间段内的完整统计数据（模型、输入、输出、缓存、调用次数）
 
   多 Agent:
@@ -2531,7 +2531,7 @@ def main():
     )
     parser.add_argument("--version", action="store_true", help="显示版本号")
     parser.add_argument("--list-backends", action="store_true", help="列出本机已安装的 Agent")
-    parser.add_argument("-b", "--backend", help="直接指定 Agent: hermes/claude-code/codex/openclaw")
+    parser.add_argument("-a", "--agent", help="直接指定 Agent: hermes/claude-code/codex/openclaw")
     parser.add_argument("--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
                         help="实时监控模式（默认每 5 秒轮询）")
     parser.add_argument("setup_pos", nargs="?", const=True, help=argparse.SUPPRESS)
@@ -2726,7 +2726,7 @@ def main():
     # ── --all (所有 Agent) ──
     if args.all:
         if args.watch is not None:
-            print("⚠️ --watch 仅支持单个 Agent，请使用 -b <name> --watch")
+            print("⚠️ --watch 仅支持单个 Agent，请使用 -a <name> --watch")
             return
         if args.compare:
             print("⚠️ --compare 仅支持单个 Agent")
@@ -2752,8 +2752,8 @@ def main():
         print("   请先使用并运行一个 Agent 后再来查看统计。")
         return
 
-    if args.backend:
-        backends = [b.strip() for b in args.backend.split(',')]
+    if args.agent:
+        backends = [b.strip() for b in args.agent.split(',')]
         agents = []
         for name in backends:
             try:
@@ -2792,7 +2792,7 @@ def main():
         b_label = args.b
         if not a_label or not b_label:
             print("❌ --compare 需要 --a 和 --b 参数")
-            print("   示例: token-stats -b hermes --compare --a today --b yesterday")
+            print("   示例: token-stats -a hermes --compare --a today --b yesterday")
             return
         run_compare(agent, a_label, b_label)
         return

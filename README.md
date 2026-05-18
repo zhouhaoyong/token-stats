@@ -21,11 +21,11 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 
 | Feature | Command | Description |
 |---------|---------|-------------|
-| **Token stats** — by time range | `token-stats -b hermes --today` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
-| **Live monitor** — context tracking | `token-stats -b hermes --watch` | Per-round delta + cumulative, warns above 90%. macOS / Linux / Windows |
+| **Token stats** — by time range | `token-stats -a hermes --today` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
+| **Live monitor** — context tracking | `token-stats -a hermes --watch` | Per-round delta + cumulative, warns above 90%. macOS / Linux / Windows |
 | **Compare** — side-by-side periods | `--compare --a today --b yesterday` | Any time range, multi-model comparison with diff column |
 | **Export** — JSON / CSV | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
-| **Model detect** — proxy API verification | `token-stats -b <name>` | Auto-detects 69 models from 13 providers by actual API response name |
+| **Model detect** — proxy API verification | `token-stats -a <name>` | Auto-detects 69 models from 13 providers by actual API response name |
 
 ---
 
@@ -107,7 +107,7 @@ That's it. Open a new terminal and run `token-stats`.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.3.5
+# Output: token-stats v2.3.6
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -118,7 +118,7 @@ token-stats --list-backends
 #   ❌ OpenClaw
 
 # Check 3: view stats for an agent
-token-stats -b hermes
+token-stats -a hermes
 # Example output:
 # 📊 Hermes
 #   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
@@ -146,26 +146,26 @@ token-stats --version
 ```bash
 # Current snapshot
 token-stats                           # interactive picker
-token-stats -b hermes                 # direct
-token-stats -b hermes,claude-code     # multi-agent
+token-stats -a hermes                 # direct
+token-stats -a hermes,claude-code     # multi-agent
 token-stats --all                     # all agents
 
 # Time range
-token-stats -b hermes --today         # today
-token-stats -b hermes --yesterday     # yesterday
-token-stats -b hermes --week          # this week
-token-stats -b hermes --from 2026-01-01 --to 2026-05-18
+token-stats -a hermes --today         # today
+token-stats -a hermes --yesterday     # yesterday
+token-stats -a hermes --week          # this week
+token-stats -a hermes --from 2026-01-01 --to 2026-05-18
 
 # Compare
-token-stats -b hermes --compare --a today --b yesterday
+token-stats -a hermes --compare --a today --b yesterday
 
 # Export
-token-stats -b hermes --export
+token-stats -a hermes --export
 token-stats --all --today --export
 
 # Live monitor
-token-stats -b hermes --watch
-token-stats -b claude-code --watch 2  # 2s interval
+token-stats -a hermes --watch
+token-stats -a claude-code --watch 2  # 2s interval
 
 # Maintenance
 token-stats --list-backends           # installed agents
@@ -189,22 +189,22 @@ Snapshot output:
 token-stats --all --today
 
 # Today — specific agent + export
-token-stats -b hermes --today --export
+token-stats -a hermes --today --export
 
 # This month — all agents + export
 token-stats --all --from 2026-05-01 --to 2026-05-31 --export
 
 # Today vs yesterday
-token-stats -b hermes --compare --a today --b yesterday
+token-stats -a hermes --compare --a today --b yesterday
 
 # Custom date range comparison
-token-stats -b hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
 
 # Multi-agent + time range
-token-stats -b hermes,claude-code --from 2026-05-01 --to 2026-05-18
+token-stats -a hermes,claude-code --from 2026-05-01 --to 2026-05-18
 
 # Live monitor (Ctrl+C to stop)
-token-stats -b hermes --watch
+token-stats -a hermes --watch
 ```
 
 ### Context alerts
@@ -422,7 +422,7 @@ sqlite3 ~/.hermes/state.db "SELECT DISTINCT model FROM sessions WHERE model IS N
 
 ```bash
 mkdir -p ~/Desktop/my-data
-token-stats -b hermes --export
+token-stats -a hermes --export
 # Enter: ~/Desktop/my-data
 ```
 
@@ -465,40 +465,22 @@ This ensures the skill is installed to `~/skills/` — the predictable home-dire
 >
 > 🕐 **Timezone**: `--today` / `--yesterday` use your **local system timezone**. E.g. on UTC+8 (Beijing), `--today` spans 00:00–23:59 CST. Machines in different timezones see different ranges.
 
-### API Relay / Proxy Service
+### API Relay
 
-> If you access LLMs through an **API relay (中转站)**, note the following caveats.
+Stats accuracy depends on whether the relay **passes through** the real API's `usage` field unchanged. `token-stats` reads what your Agent wrote locally — it does not verify against the real API.
 
-token-stats relies on the `usage` object returned by the real API. The data flow is:
+### How It Works
+
+`token-stats` reads local data files (SQLite / JSONL) written by each Agent, aggregating `input_tokens`, `output_tokens`, `cache_read_tokens`, and call counts from the `usage` object.
 
 ```
-Your Agent → Relay → Real API
-                         ↓
-           Real API returns usage object
-                         ↓
-           Relay forwards the response to your Agent
-                         ↓
-           Your Agent writes to local storage
-                         ↓
-           token-stats reads from local storage
+API returns usage → Agent writes locally → token-stats reads & aggregates
 ```
 
-**Accurate stats require:** the relay to pass through the original API response **as-is** (including the `usage` field). Most mainstream relays do this.
+Results may differ from your API billing dashboard because:
+- **Cache tokens** may be counted multiple times (once per cache hit)
+- **Agent recording gaps** — some Agents/versions don't record all fields
+- **Timezone mismatch** — API dashboards use UTC, this tool uses local time
+- **Relay modification** — some relays alter or drop the `usage` field
 
-**Stats may be inaccurate if:** the relay:
-- Removes the `usage` field
-- Tampers with token counts (e.g. inflating usage)
-- Replaces model names
-
-token-stats **only records what it receives** — it does not verify data against the real API. It is a **local ledger** that records what your Agent wrote down, not the upstream API's billing invoice.
-
-> If you suspect relay data is inaccurate, compare token-stats output with the relay's billing dashboard. Discrepancies suggest data may have been modified.
-
----
-
-token-stats is fundamentally an **open-source transparency tool**. It does not judge relay services — it makes token consumption **auditable and verifiable**:
-
-- For **honest relays**: users can cross-check and build trust
-- For **dishonest relays**: data discrepancies expose the problem
-
-Whether you connect directly or through a relay, users deserve to know their actual consumption. token-stats doesn't take sides — it just keeps the books.
+> This is a **local ledger** — it shows what your Agent recorded, not the upstream billing.

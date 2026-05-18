@@ -8,11 +8,11 @@
 
 | 功能 | 命令 | 说明 |
 |------|------|------|
-| **Token 消耗统计** — 指定时间范围 | `token-stats -b hermes --today` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
-| **实时监控** — 上下文占比追踪 | `token-stats -b hermes --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
+| **Token 消耗统计** — 指定时间范围 | `token-stats -a hermes --today` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
+| **实时监控** — 上下文占比追踪 | `token-stats -a hermes --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
 | **时段对比** — 两个时间段并排比较 | `--compare --a today --b yesterday` | 任意时间段聚合，多模型横向对比，带差值列 |
 | **数据导出** — JSON / CSV | `--export` | 多 Agent、多时间段组合，交互式选目录 |
-| **模型识别** — 中转站 API 校验 | `token-stats -b <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
+| **模型识别** — 中转站 API 校验 | `token-stats -a <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
 
 ---
 
@@ -75,6 +75,22 @@ clawhub -V          # 显示版本号
 
 通过中转站访问大模型时，统计准确性取决于中转站是否**原样透传** API 返回的 `usage` 字段。`token-stats` 只记录 Agent 本地写入的数据，不校验与上游 API 是否一致。
 
+### 统计原理
+
+`token-stats` 读取各 Agent 写入本地的数据文件（SQLite / JSONL），按模型聚合 `usage` 对象中的 `input_tokens`、`output_tokens`、`cache_read_tokens` 和调用次数。数据链路：
+
+```
+API 返回 usage → Agent 写入本地 → token-stats 读取汇总
+```
+
+统计结果可能与 API 结算后台存在偏差，原因：
+- **缓存 token 叠加**：`cache_read_tokens` 可能被多次计入（每轮缓存命中都计数）
+- **Agent 未完整记录**：部分 Agent/版本不记录 `tool_call_count` 等字段
+- **时区差异**：API 后台使用 UTC，本工具使用本地时区
+- **中转站改写**：中转站可能修改或移除 `usage` 字段
+
+> 本工具定位为**本地账本**，呈现的是 Agent 记录的数据，非上游结算依据。
+
 ## 安装
 
 满足以上环境后，两行命令搞定：
@@ -106,7 +122,7 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.3.5
+# 输出: token-stats v2.3.6
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -117,7 +133,7 @@ token-stats --list-backends
 #   ❌ OpenClaw
 
 # 验证 3：直接看某个 Agent 的统计
-token-stats -b hermes
+token-stats -a hermes
 # 输出示例:
 # 📊 Hermes
 #   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
@@ -148,26 +164,26 @@ token-stats --version
 ```bash
 # 当前快照
 token-stats                           # 交互式选择
-token-stats -b hermes                 # 直接指定
-token-stats -b hermes,claude-code     # 多 Agent
+token-stats -a hermes                 # 直接指定
+token-stats -a hermes,claude-code     # 多 Agent
 token-stats --all                     # 所有 Agent
 
 # 时间段
-token-stats -b hermes --today         # 今日
-token-stats -b hermes --yesterday     # 昨日
-token-stats -b hermes --week          # 本周
-token-stats -b hermes --from 2026-01-01 --to 2026-05-18
+token-stats -a hermes --today         # 今日
+token-stats -a hermes --yesterday     # 昨日
+token-stats -a hermes --week          # 本周
+token-stats -a hermes --from 2026-01-01 --to 2026-05-18
 
 # 对比
-token-stats -b hermes --compare --a today --b yesterday
+token-stats -a hermes --compare --a today --b yesterday
 
 # 导出
-token-stats -b hermes --export
+token-stats -a hermes --export
 token-stats --all --today --export
 
 # 实时监控
-token-stats -b hermes --watch
-token-stats -b claude-code --watch 2  # 2 秒刷新
+token-stats -a hermes --watch
+token-stats -a claude-code --watch 2  # 2 秒刷新
 
 # 维护
 token-stats --list-backends           # 列出已安装的 Agent
@@ -197,28 +213,28 @@ token-stats --uninstall               # 卸载
 token-stats --all --today
 
 # 今天指定 Agent + 导出
-token-stats -b hermes --today --export
+token-stats -a hermes --today --export
 
 # 本周 Claude Code 的用量
-token-stats -b claude-code --week
+token-stats -a claude-code --week
 
 # 本月所有 Agent 统计并导出
 token-stats --all --from 2026-05-01 --to 2026-05-31 --export
 
 # 今天 vs 昨天对比
-token-stats -b hermes --compare --a today --b yesterday
+token-stats -a hermes --compare --a today --b yesterday
 
 # 指定时间段对比
-token-stats -b hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
 
 # 多 Agent 指定时间段
-token-stats -b hermes,claude-code --from 2026-05-01 --to 2026-05-18
+token-stats -a hermes,claude-code --from 2026-05-01 --to 2026-05-18
 
 # 全 Agent 今天数据导出 JSON
 token-stats --all --today --export
 
 # 实时监控（边聊边看，Ctrl+C 停止看汇总）
-token-stats -b hermes --watch
+token-stats -a hermes --watch
 ```
 
 ### 上下文占比提醒
@@ -286,7 +302,7 @@ token-stats
 
 **边用 Claude Code 边盯着消耗？**
 ```bash
-token-stats -b claude-code --watch
+token-stats -a claude-code --watch
 # 切到 Claude Code 干活，这边实时跳动 tokens
 ```
 

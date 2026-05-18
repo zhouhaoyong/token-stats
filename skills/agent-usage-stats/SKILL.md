@@ -1,11 +1,11 @@
 ---
 name: agent-usage-stats
 description: "选择要监控的 AI 助手 → 查看 token 消耗。支持 Hermes / Claude Code / CodeX / OpenClaw，每次都让你选"
-version: 2.3.5
-author: zhouhaoyong
+version: 2.3.6
+author: zhy
 license: MIT
-source: https://github.com/zhouhaoyong/token-stats
-clawhub: https://clawhub.ai/zhouhaoyong/agent-usage-stats
+source: https://github.com/zhy/token-stats
+clawhub: https://clawhub.ai/zhy/agent-usage-stats
 tags:
   - token
   - usage
@@ -35,13 +35,13 @@ tags:
 token-stats
 
 # 跳过菜单直接看
-token-stats -b hermes
-token-stats -b claude-code
-token-stats -b codex
+token-stats -a hermes
+token-stats -a claude-code
+token-stats -a codex
 
 # 实时监控
 token-stats --watch
-token-stats -b hermes --watch
+token-stats -a hermes --watch
 
 # 查看本机装了哪些 Agent
 token-stats --list-backends
@@ -55,7 +55,7 @@ token-stats --version
 Hermes 的 SKILL.md 里可以这样用：
 
 ```yaml
-run: token-stats -b hermes
+run: token-stats -a hermes
 ```
 
 这样每次任务结束会自动输出 Hermes 的 token 消耗，不弹菜单。
