@@ -17,16 +17,15 @@
 
 ## 为什么选择 token-stats
 
-市面上有那么多日志工具，为什么这个值得一试？
+`token-stats` 直接读取本地数据，跨 Agent、跨模型、跨平台运行。零依赖，纯 Python 标准库。
 
-| 你要做的事 | 怎么用 | 它能解决什么问题 |
-|-----------|--------|----------------|
-| **📊 查账** — 看一眼就知道花了多少 | `token-stats` | 所有 Agent、所有模型，一行一个，有数据的才显示，没数据不占眼 |
-| **📡 盯盘** — 边聊边看上下文余量 | `token-stats -b hermes --watch` | 每轮增量 + 当前上下文占比，快满屏了会预警，提醒你该 `/new` 了 |
-| **📅 算账** — 今天比昨天多花了多少 | `--today --compare --a today --b yesterday` | 任意时间段聚合、两个时段并排对比带差值，一眼看出趋势 |
-| **💾 存档** — 统计结果导出留底 | `--export` | 交互式选目录和格式（JSON/CSV），跨平台路径支持 |
-
-**而且它零依赖** — 纯 Python 标准库，不用 pip install 任何东西，装完即用。macOS / Linux / Windows 都支持。
+| 功能 | 命令 | 说明 |
+|------|------|------|
+| **Token 消耗统计** — 指定时间范围 | `token-stats -b hermes --today` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
+| **实时监控** — 上下文占比追踪 | `token-stats -b hermes --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
+| **时段对比** — 两个时间段并排比较 | `--compare --a today --b yesterday` | 任意时间段聚合，多模型横向对比，带差值列 |
+| **数据导出** — JSON / CSV | `--export` | 多 Agent、多时间段组合，交互式选目录 |
+| **模型识别** — 中转站 API 校验 | `token-stats -b <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
 
 ---
 
@@ -140,20 +139,20 @@ clawhub install agent-usage-stats
 python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```
 
-> 如果报错 `can't open file '...~...'`，说明 PowerShell 没有正确展开路径，参考：[PowerShell 路径展开问题](#ps-tilde)
-```
-
 > `cd ~` 确保技能安装到用户主目录（所有系统都有写入权限）。
 > 如果 `python` 找不到，试试 `python3`（Microsoft Store 版 Python 用 `python3`）。
+> 如果报错 `can't open file '...~...'`，参考：[PowerShell 路径展开问题](#ps-tilde)。
+>
+> `setup` 会自动将 `~/.local/bin` 加入系统 PATH，**需要新开一个终端窗口**才能生效。
 
-好了。以后在终端直接敲 `token-stats` 就能用。
+好了。新开终端，直接敲 `token-stats` 就能用。
 
 ### 验证安装成功
 
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.2.8
+# 输出: token-stats v2.3.0
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -554,7 +553,8 @@ token-stats --list-backends
 | 命令 | 说明 |
 |------|------|
 | `clawhub install agent-usage-stats` | 从 ClawHub 安装 |
-| `token-stats --setup` | 创建 `~/.local/bin/token-stats` 全局命令 |
+| `token-stats --setup` | 创建全局命令 + 自动加入 PATH |
+| `token-stats --uninstall` | 删除全局命令 + 自动清理 PATH |
 
 > 💡 以上所有命令也可以通过 `token-stats --help` 在线查看。
 
@@ -631,30 +631,15 @@ token-stats
 
 ## 卸载
 
-**macOS / Linux：**
 ```bash
-# 移除 token-stats 技能
+# 第 1 步：清理全局命令 + PATH（自动）
+token-stats --uninstall
+
+# 第 2 步：移除技能文件
 clawhub uninstall agent-usage-stats
-
-# 删除全局命令
-rm -f ~/.local/bin/token-stats
-
-# 清理旧 alias（如果你之前设过 alias token-stats=...）
-grep "alias token-stats" ~/.zshrc ~/.bashrc 2>/dev/null || echo "没有发现旧的 alias"
-
-# 如果有输出对应的行，手动删除或用 sed（macOS: sed -i ''，Linux: sed -i）
-sed -i '' '/alias token-stats/d' ~/.zshrc 2>/dev/null || sed -i '/alias token-stats/d' ~/.zshrc
-source ~/.zshrc
 ```
 
-**Windows（PowerShell）：**
-```powershell
-# 移除 token-stats 技能
-clawhub uninstall agent-usage-stats
-
-# 删除全局命令
-Remove-Item -Force ~\.local\bin\token-stats.cmd
-```
+> `--uninstall` 会自动删除包装器、清理 PATH 条目、删除配置文件。三平台统一。
 
 ---
 
@@ -730,38 +715,27 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 
 #### ❓ `token-stats` 命令找不到
 
-**原因：`~/.local/bin/` 不在 PATH 中。**
+**原因 1：还没执行 `setup`** → 按上方安装指引执行 `python $HOME\skills\...\token-stats.py setup`（Windows）或 `python3 ~/skills/.../token-stats.py setup`（macOS/Linux）。
 
-**macOS（默认 zsh）：**
+**原因 2：执行了 `setup` 但没新开终端** → `setup` 已将 PATH 写入系统配置，但当前终端不生效，新开一个终端即可。
+
+**原因 3：setup 执行失败** → 重新执行 `setup`，观察是否有报错。如果 PATH 添加失败，可手动添加：
+
+**macOS（zsh）：**
 ```bash
-echo $PATH | grep .local/bin
-# 如果没输出：
 echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.zshrc
 source ~/.zshrc
-# 或直接运行：
-~/.local/bin/token-stats --version
 ```
 
-**Linux（默认 bash）：**
+**Linux（bash）：**
 ```bash
-echo $PATH | grep .local/bin
-# 如果没输出：
 echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 source ~/.bashrc
-# 或直接运行：
-~/.local/bin/token-stats --version
 ```
 
-**Windows（PowerShell）：**
+**Windows（PowerShell 临时）：**
 ```powershell
-# 检查
-$env:PATH -split ';' | Select-String '.local'
-# 如果没输出，临时添加：
 $env:PATH += ';' + "$env:USERPROFILE\.local\bin"
-# 永久添加（管理员）：
-[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';' + "$env:USERPROFILE\.local\bin", 'User')
-# 或直接运行：
-& "$env:USERPROFILE\.local\bin\token-stats.cmd" --version
 ```
 
 #### ❓ 执行 `token-stats` 报 `Permission denied`

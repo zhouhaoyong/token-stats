@@ -31,7 +31,8 @@ token-stats — 选个 Agent 看它的 token 消耗
 
 安装:
   clawhub install agent-usage-stats
-  token-stats setup              创建 ~/.local/bin/token-stats
+  token-stats setup              创建全局命令并自动加入 PATH
+  token-stats --uninstall         删除全局命令并清理 PATH
 """
 
 from __future__ import annotations
@@ -51,13 +52,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.2.8"
+VERSION = "2.3.0"
 
-# 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
+# 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
     sys.stdout.reconfigure(line_buffering=True, encoding="utf-8")
 except Exception:
-    pass
+    try:
+        sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
+    except Exception:
+        pass
 
 # ── 路径配置系统 ──
 # 支持 setup 时自动检测 Agent 路径，保存到配置文件
@@ -364,6 +368,28 @@ def parse_time_label(label: str) -> tuple:
     return parse_date(s)
 
 
+def label_to_display(label: str) -> str:
+    """将时间标签转为人类可读的日期字符串，用于对比模式列头。"""
+    s = label.strip().lower()
+    now = datetime.now()
+    if s == "today":
+        return now.strftime("%Y-%m-%d")
+    if s == "yesterday":
+        return (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    if s in ("this-week", "week"):
+        monday = now - timedelta(days=now.weekday())
+        return f"{monday.strftime('%Y-%m-%d')}~{now.strftime('%Y-%m-%d')}"
+    if s == "last-week":
+        monday = now - timedelta(days=now.weekday() + 7)
+        sunday = monday + timedelta(days=6)
+        return f"{monday.strftime('%Y-%m-%d')}~{sunday.strftime('%Y-%m-%d')}"
+    if s == "last-7d":
+        start = now - timedelta(days=7)
+        return f"{start.strftime('%Y-%m-%d')}~{now.strftime('%Y-%m-%d')}"
+    # 已经是日期或日期段格式，直接返回
+    return label
+
+
 def _skip_model(pm: dict) -> bool:
     """过滤掉 unknown 且无数据的模型条目（输出/导出/监控通用）。"""
     model = (pm.get("model", "") or "").strip()
@@ -396,12 +422,7 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
         parts.append(f"输出 {fmt_num(out)}")
     if cache > 0:
         parts.append(f"缓存 {fmt_num(cache)}")
-    if calls > 0 and (not session_count or session_count != calls):
-        parts.append(f"调用 {calls} 次")
-    elif calls > 0 and session_count == calls and total == 0:
-        # 无 token 数据时，不重复显示 "调用 N 次" 和 "N 轮会话"
-        pass
-    elif calls > 0:
+    if calls > 0 and session_count != calls:
         parts.append(f"调用 {calls} 次")
     if session_count:
         parts.append(f"{session_count} 轮会话")
@@ -429,6 +450,9 @@ class AgentData:
 class BaseAgent(ABC):
     """Agent 检测器基类"""
 
+    # 支持实时上下文占比显示（会话型 Agent 为 True，累计型为 False）
+    _has_live_context = False
+
     @staticmethod
     @abstractmethod
     def name() -> str: ...
@@ -451,8 +475,12 @@ class BaseAgent(ABC):
         def _on_signal(sig, frame):
             stop_event.set()
 
-        signal.signal(signal.SIGINT, _on_signal)
-        signal.signal(signal.SIGTERM, _on_signal)
+        old_sigint = signal.signal(signal.SIGINT, _on_signal)
+        old_sigterm = None
+        try:
+            old_sigterm = signal.signal(signal.SIGTERM, _on_signal)
+        except (ValueError, AttributeError):
+            pass  # Windows 上 SIGTERM 不可用
 
         def _interruptible_sleep(seconds: float) -> bool:
             """中断式睡眠，返回 False 表示被中断"""
@@ -464,7 +492,12 @@ class BaseAgent(ABC):
         print(f"\n📡 实时监控 [{self.display_name()}] — 每 {interval} 秒刷新 (Ctrl+C 停止)\n")
 
         # ── 首次基线 ──
-        data_first = self.collect()
+        try:
+            data_first = self.collect()
+        except Exception as e:
+            print(f"  ⚠️ 无法读取数据: {e}")
+            print("👋 监控已停止")
+            return
         bl_models = {}
         if data_first.per_model:
             for pm in data_first.per_model:
@@ -475,26 +508,32 @@ class BaseAgent(ABC):
                     "cache": pm.get("cache", 0),
                 }
         else:
-            m = data_first.stats.get("model", "?")
-            bl_models[m] = {
-                "input": data_first.stats.get("input_tokens", 0),
-                "output": data_first.stats.get("output_tokens", 0),
-                "calls": data_first.stats.get("api_calls", 0),
-                "cache": data_first.stats.get("cache_read", 0),
-            }
+            m = data_first.stats.get("model", "")
+            if m and m != "?" and data_first.stats.get("input_tokens", 0) > 0:
+                bl_models[m] = {
+                    "input": data_first.stats.get("input_tokens", 0),
+                    "output": data_first.stats.get("output_tokens", 0),
+                    "calls": data_first.stats.get("api_calls", 0),
+                    "cache": data_first.stats.get("cache_read", 0),
+                }
 
         # ── 初始状态 ──
         bl_initial = {k: dict(v) for k, v in bl_models.items()}  # 保存初始基线，用于最终汇总
         print("初始状态:")
         has_data = False
         for mn, mv in bl_models.items():
-            cw = detect_context(mn)
             total = mv["input"] + mv["output"]
-            pct = round(total / cw * 100, 1) if cw else 0
-            ctx_str = f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})"
-            parts = [ctx_str,
-                     f"输入 {fmt_num(mv['input'])} tokens",
-                     f"输出 {fmt_num(mv['output'])} tokens"]
+            parts = []
+            if self._has_live_context:
+                cw = detect_context(mn)
+                pct = round(total / cw * 100, 1) if cw else 0
+                parts.append(f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})")
+            else:
+                parts.append(f"总计 {fmt_num(total)}")
+            parts.extend([
+                f"输入 {fmt_num(mv['input'])} tokens",
+                f"输出 {fmt_num(mv['output'])} tokens"
+            ])
             if mv.get("cache", 0):
                 parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
             parts.append(f"调用 {mv['calls']}")
@@ -506,11 +545,11 @@ class BaseAgent(ABC):
 
         # ── 监控循环 ──
         while not stop_event.is_set():
-            tick_start = time.monotonic()
             if not _interruptible_sleep(interval):
                 break
             if stop_event.is_set():
                 break
+            tick_start = time.monotonic()
             try:
                 data = self.collect()
             except Exception as e:
@@ -558,10 +597,14 @@ class BaseAgent(ABC):
             any_delta = bool(changed_models)
             if any_delta:
                 summary_parts = []
-                if total_delta_tok:
+                if total_delta_tok > 0:
                     summary_parts.append(f"+{fmt_num(total_delta_tok)} tokens")
-                if total_delta_calls:
+                elif total_delta_tok < 0:
+                    summary_parts.append(f"{fmt_num(total_delta_tok)} tokens")
+                if total_delta_calls > 0:
                     summary_parts.append(f"+{total_delta_calls} 调用")
+                elif total_delta_calls < 0:
+                    summary_parts.append(f"{total_delta_calls} 调用")
                 print(f"── [{ts}] {' '.join(summary_parts)} ──")
             else:
                 print(f"── [{ts}] 无变化 ──")
@@ -576,12 +619,14 @@ class BaseAgent(ABC):
                     d_calls = mv["calls"] - bl["calls"]
                     has_delta = d_tok > 0 or d_cache > 0 or d_calls > 0
 
-                    cw = detect_context(mn)
                     total = mv["input"] + mv["output"]
-                    pct = round(total / cw * 100, 1) if cw else 0
-                    ctx_str = f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})"
-
-                    parts = [ctx_str]
+                    parts = []
+                    if self._has_live_context:
+                        cw = detect_context(mn)
+                        pct = round(total / cw * 100, 1) if cw else 0
+                        parts.append(f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})")
+                    else:
+                        parts.append(f"总计 {fmt_num(total)}")
 
                     if has_delta:
                         parts.append(f"输入 +{fmt_num(d_in)}/{fmt_num(mv['input'])} tokens")
@@ -634,12 +679,16 @@ class BaseAgent(ABC):
         if bl_models:
             print("  最终状态:")
             for mn, mv in sorted(bl_models.items()):
-                cw = detect_context(mn)
                 total = mv["input"] + mv["output"]
-                pct = round(total / cw * 100, 1) if cw else 0
-                ctx_str = f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})"
-                parts = [ctx_str, f"输入 {fmt_num(mv['input'])} tokens",
-                         f"输出 {fmt_num(mv['output'])} tokens"]
+                parts = []
+                if self._has_live_context:
+                    cw = detect_context(mn)
+                    pct = round(total / cw * 100, 1) if cw else 0
+                    parts.append(f"上下文 {fmt_num(total)}/{fmt_num(cw)} ({fmt_pct(pct)})")
+                else:
+                    parts.append(f"总计 {fmt_num(total)}")
+                parts.extend([f"输入 {fmt_num(mv['input'])} tokens",
+                              f"输出 {fmt_num(mv['output'])} tokens"])
                 if mv.get("cache", 0):
                     parts.append(f"缓存 {fmt_num(mv['cache'])} tokens")
                 parts.append(f"调用 {mv['calls']}")
@@ -729,6 +778,8 @@ def _hermes_current_session_id() -> str | None:
 
 
 class HermesAgent(BaseAgent):
+    _has_live_context = True  # 有当前会话概念，上下文占比有意义
+
     @staticmethod
     def name() -> str:
         return "hermes"
@@ -1006,10 +1057,8 @@ class ClaudeCodeAgent(BaseAgent):
         raw_lines = ["📊 Claude Code"]
         for mn in meaningful_models:
             md = per_model_data[mn]
-            cw = detect_context(mn)
             line = format_model_line(
                 mn, md["input"], md["output"], md["cache"], md["calls"],
-                context_window=cw,
                 extra=f"子代理 {total_sub}" if total_sub > 0 and len(meaningful_models) <= 3 else None
             )
             if line:
@@ -1119,9 +1168,12 @@ class CodeXAgent(BaseAgent):
                     cnt = r["cnt"] or 0
                     per_model_list.append({"model": model, "input": ts, "output": 0,
                                             "calls": cnt, "cache": 0})
-                    line = format_model_line(model, ts, 0, 0, cnt, session_count=cnt)
-                    if line:
-                        raw_lines.append(line)
+                    # CodeX 不区分输入/输出，仅显示总计
+                    if ts > 0 or cnt > 0:
+                        parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
+                        parts.append(f"调用 {cnt}")
+                        parts.append(f"{cnt} 轮会话")
+                        raw_lines.append(f"  {model} | {' | '.join(parts)}")
                     total_tok += ts
                     total_cnt += cnt
 
@@ -1160,9 +1212,12 @@ class CodeXAgent(BaseAgent):
                 cnt = r["cnt"] or 0
                 per_model_list.append({"model": model, "input": ts, "output": 0,
                                         "calls": cnt, "cache": 0})
-                line = format_model_line(model, ts, 0, 0, cnt, session_count=cnt)
-                if line:
-                    raw_lines.append(line)
+                # CodeX 不区分输入/输出，仅显示总计
+                if ts > 0 or cnt > 0:
+                    parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
+                    parts.append(f"调用 {cnt}")
+                    parts.append(f"{cnt} 轮会话")
+                    raw_lines.append(f"  {model} | {' | '.join(parts)}")
                 total_tok += ts
 
             if len(rows) == 1 and total_sessions > rows[0]["cnt"]:
@@ -1290,6 +1345,8 @@ def _openclaw_parse_jsonl(fpath: str, from_ts: float = None, to_ts: float = None
 
 
 class OpenClawAgent(BaseAgent):
+    _has_live_context = True  # 有当前会话概念，上下文占比有意义
+
     @staticmethod
     def name() -> str:
         return "openclaw"
@@ -1573,11 +1630,13 @@ def export_interactive(data: AgentData, agent: BaseAgent):
             calls = pm.get("calls", 0)
             total_tok = inp + out
             total_w_cache = total_tok + cache
-            cw = detect_context(m)
-            pct = round(total_tok / cw * 100, 1) if cw else 0
-
             print(f"  {m}")
-            print(f"    上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
+            if agent._has_live_context:
+                cw = detect_context(m)
+                pct = round(total_tok / cw * 100, 1) if cw else 0
+                print(f"    上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
+            else:
+                print(f"    总计 tokens     {fmt_num(total_tok):>8}")
             print(f"    输入 tokens     {fmt_num(inp):>8}")
             print(f"    输出 tokens     {fmt_num(out):>8}")
             print(f"    缓存 tokens     {fmt_num(cache):>8}")
@@ -1742,10 +1801,11 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 calls = pm.get("calls", 0)
                 total_tok = inp + out
                 total_w_cache = total_tok + cache
-                cw = detect_context(m)
-                pct = round(total_tok / cw * 100, 1) if cw else 0
                 print(f"    {m}")
-                print(f"      上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
+                if agent._has_live_context:
+                    cw = detect_context(m)
+                    pct = round(total_tok / cw * 100, 1) if cw else 0
+                    print(f"      上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
                 print(f"      输入 tokens     {fmt_num(inp):>8}")
                 print(f"      输出 tokens     {fmt_num(out):>8}")
                 print(f"      缓存 tokens     {fmt_num(cache):>8}")
@@ -1929,16 +1989,18 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         print("两个时间段均无数据")
         return
 
-    print(f"\n📊 对比: \"{a_label}\" vs \"{b_label}\"  [{agent.display_name()}]")
+    a_disp = label_to_display(a_label)
+    b_disp = label_to_display(b_label)
+    print(f"\n📊 对比: {a_disp} vs {b_disp}  [{agent.display_name()}]")
     # 列宽根据标签长度自适应
-    label_w = max(len(b_label), 12) if len(b_label) > len(a_label) else max(len(a_label), 12)
+    label_w = max(len(b_disp), 12) if len(b_disp) > len(a_disp) else max(len(a_disp), 12)
     col_model = 28      # 模型列宽（不含前导空格）
     col_delta = 12      # 变化列宽
     sep = 3             # " | " 分隔符宽度
     leading = 2         # "  " 前导空格
     total_w = leading + col_model + sep + label_w + sep + label_w + sep + col_delta
     print("═" * total_w)
-    print(f"  {'模型':<{col_model}} | {a_label:>{label_w}} | {b_label:>{label_w}} | {'变化':>{col_delta}}")
+    print(f"  {'模型':<{col_model}} | {a_disp:>{label_w}} | {b_disp:>{label_w}} | {'变化':>{col_delta}}")
     print("─" * total_w)
 
     total_a, total_b = 0, 0
@@ -2009,6 +2071,99 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
 
 
 # ═══════════════════════════════════════════════════
+#  PATH 管理（--setup / --uninstall 共用）
+# ═══════════════════════════════════════════════════
+
+PATH_MARKER_START = "# >>> token-stats PATH >>>"
+PATH_MARKER_END = "# <<< token-stats PATH <<<"
+
+
+def _add_to_path_windows(bin_dir):
+    """将目录添加到用户 PATH（注册表），广播变更消息。返回 True/False。"""
+    import ctypes
+    import winreg
+    key = None
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE)
+        try:
+            current, _ = winreg.QueryValueEx(key, "PATH")
+        except FileNotFoundError:
+            current = ""
+        entries = [e for e in current.split(";") if e]
+        if bin_dir in entries:
+            return False
+        entries.append(bin_dir)
+        new_path = ";".join(entries)
+        winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ, new_path)
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 2, 5000, None)
+        return True
+    except Exception:
+        return False
+    finally:
+        if key is not None:
+            winreg.CloseKey(key)
+
+
+def _remove_from_path_windows(bin_dir):
+    """从用户 PATH 中移除目录（注册表），广播变更消息。"""
+    import ctypes
+    import winreg
+    key = None
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE)
+        current, _ = winreg.QueryValueEx(key, "PATH")
+        entries = [e for e in current.split(";") if e and e != bin_dir]
+        new_path = ";".join(entries)
+        winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ, new_path)
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 2, 5000, None)
+        return True
+    except Exception:
+        return False
+    finally:
+        if key is not None:
+            winreg.CloseKey(key)
+
+
+def _add_to_path_unix(bin_dir, rc_file):
+    """将 export PATH 行（带标记）追加到 shell 配置文件。若已存在则跳过。"""
+    rc_path = os.path.expanduser(rc_file)
+    export_line = f'export PATH="$PATH:{bin_dir}"'
+    block = f"\n{PATH_MARKER_START}\n{export_line}\n{PATH_MARKER_END}\n"
+    try:
+        if os.path.exists(rc_path):
+            with open(rc_path, "r", encoding="utf-8") as f:
+                if PATH_MARKER_START in f.read():
+                    return False  # 已存在，跳过
+        with open(rc_path, "a", encoding="utf-8") as f:
+            f.write(block)
+        return True
+    except Exception:
+        return False
+
+
+def _remove_from_path_unix(bin_dir, rc_file):
+    """从 shell 配置文件中移除 token-stats PATH 标记块。"""
+    rc_path = os.path.expanduser(rc_file)
+    if not os.path.exists(rc_path):
+        return False
+    try:
+        with open(rc_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        pattern = f"\n{PATH_MARKER_START}\nexport PATH=\"$PATH:{bin_dir}\"\n{PATH_MARKER_END}\n"
+        if pattern in content:
+            content = content.replace(pattern, "")
+        # also try without leading newline (at file start)
+        pattern2 = f"{PATH_MARKER_START}\nexport PATH=\"$PATH:{bin_dir}\"\n{PATH_MARKER_END}\n"
+        if pattern2 in content:
+            content = content.replace(pattern2, "")
+        with open(rc_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return True
+    except Exception:
+        return False
+
+
+# ═══════════════════════════════════════════════════
 #  CLI 入口
 # ═══════════════════════════════════════════════════
 
@@ -2052,9 +2207,10 @@ def main():
     token-stats --all                 查看本机所有 Agent 统计
     token-stats --list-backends       列出已安装的 Agent
 
-  安装:
+  安装与卸载:
     clawhub install agent-usage-stats  从 ClawHub 安装
-    token-stats --setup                创建 ~/.local/bin/token-stats 全局命令
+    token-stats --setup                创建全局命令 + 自动加入 PATH
+    token-stats --uninstall            删除全局命令 + 自动清理 PATH
         """,
     )
     parser.add_argument("--version", action="store_true", help="显示版本号")
@@ -2081,13 +2237,16 @@ def main():
     parser.add_argument("--detail", action="store_true", help="详细信息模式")
     parser.add_argument("--now", action="store_true", help="当前快照（同默认）")
     parser.add_argument("--all", action="store_true", help="查看本机所有 Agent 统计")
-    parser.add_argument("--setup", action="store_true", help="创建 ~/.local/bin/token-stats")
+    parser.add_argument("--setup", action="store_true", help="创建 ~/.local/bin/token-stats 并自动加入 PATH")
+    parser.add_argument("--uninstall", action="store_true", help="删除全局命令并清理 PATH")
 
     args = parser.parse_args()
 
-    # 兼容旧用法：token-stats setup → 当作 --setup
+    # 兼容旧用法：token-stats setup / uninstall → 当作 --setup / --uninstall
     if args.setup_pos is True or args.setup_pos == "setup":
         args.setup = True
+    if args.setup_pos == "uninstall":
+        args.uninstall = True
 
     # ── version ──
     if args.version:
@@ -2097,10 +2256,12 @@ def main():
     # ── setup ──
     if args.setup:
         is_win = sys.platform == "win32"
+        is_mac = sys.platform == "darwin"
         bin_dir = os.path.join(os.path.expanduser("~"), ".local", "bin")
         script_path = os.path.abspath(__file__)
         os.makedirs(bin_dir, exist_ok=True)
 
+        # 1. 创建包装器
         if is_win:
             target = os.path.join(bin_dir, "token-stats.cmd")
             wrapper = f'@python "{script_path}" %*\n'
@@ -2117,8 +2278,20 @@ def main():
             os.chmod(target, 0o755)
 
         print(f"✅ 已创建全局命令: {target}")
-        print(f"   → 每次执行都调用: python3 {script_path}")
 
+        # 2. 自动添加 PATH
+        print("⏳ 正在添加到系统 PATH...", end="", flush=True)
+        path_ok = bin_dir in os.environ.get("PATH", "").split(os.pathsep)
+        if not path_ok:
+            if is_win:
+                _add_to_path_windows(bin_dir)
+            elif is_mac:
+                _add_to_path_unix(bin_dir, "~/.zshrc")
+            else:
+                _add_to_path_unix(bin_dir, "~/.bashrc")
+        print("\r✅ 已添加到系统 PATH                    ")
+
+        # 3. 检查旧 alias（仅 Unix）
         if not is_win:
             for rc_file in ["~/.zshrc", "~/.bashrc", "~/.bash_profile"]:
                 rc_path = os.path.expanduser(rc_file)
@@ -2136,7 +2309,7 @@ def main():
                             print(al)
                         print("   删除方法: 手动编辑或用 sed 删除对应行，然后 source ~/.zshrc")
 
-        # ── 扫描并保存 Agent 数据路径 ──
+        # 4. 扫描并保存 Agent 数据路径
         agent_paths = _scan_all_agent_paths()
         if agent_paths:
             _save_agent_paths(agent_paths)
@@ -2148,19 +2321,46 @@ def main():
         else:
             print("ℹ️  未检测到任何 Agent 数据文件，运行后会自动尝试标准路径")
 
-        if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
-            if is_win:
-                print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到系统 PATH:")
-                print(f"   PowerShell (当前会话): $env:PATH += ';{bin_dir}'")
-                print(f"   永久添加: [Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';{bin_dir}', 'User')")
-            elif sys.platform == "darwin":
-                print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
-                print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.zshrc")
-                print(f"   source ~/.zshrc")
-            else:
-                print(f"⚠️  {bin_dir} 不在 PATH 中，请添加到 shell 配置:")
-                print(f"   echo 'export PATH=\"$PATH:{bin_dir}\"' >> ~/.bashrc")
-                print(f"   source ~/.bashrc")
+        print()
+        print("现在可以在新终端窗口中直接运行: token-stats --version")
+        return
+
+    # ── uninstall ──
+    if args.uninstall:
+        is_win = sys.platform == "win32"
+        is_mac = sys.platform == "darwin"
+        bin_dir = os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+        # 1. 删除包装器
+        if is_win:
+            target = os.path.join(bin_dir, "token-stats.cmd")
+        else:
+            target = os.path.join(bin_dir, "token-stats")
+        if os.path.exists(target):
+            os.remove(target)
+            print(f"✅ 已删除: {target}")
+        else:
+            print(f"ℹ️  全局命令不存在: {target}")
+
+        # 2. 清理 PATH
+        print("⏳ 正在清理系统 PATH...", end="", flush=True)
+        if is_win:
+            _remove_from_path_windows(bin_dir)
+        elif is_mac:
+            _remove_from_path_unix(bin_dir, "~/.zshrc")
+        else:
+            _remove_from_path_unix(bin_dir, "~/.bashrc")
+        print("\r✅ 已清理系统 PATH                    ")
+
+        # 3. 清理配置文件
+        config_dir = os.path.join(os.path.expanduser("~"), ".config", "token-stats")
+        if os.path.exists(config_dir):
+            import shutil
+            shutil.rmtree(config_dir, ignore_errors=True)
+            print(f"✅ 已清理配置文件: {config_dir}")
+
+        print()
+        print("卸载完成。如需彻底删除技能文件，请执行: clawhub uninstall agent-usage-stats")
         return
 
     # ── list-backends ──

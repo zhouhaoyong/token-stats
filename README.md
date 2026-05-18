@@ -17,16 +17,15 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 
 ## Why token-stats
 
-With plenty of log viewers out there, why pick this one?
+`token-stats` reads local data directly — works across agents, models, and platforms. Zero dependencies, pure Python stdlib.
 
-| What you want to do | How | What it solves |
-|---------------------|-----|----------------|
-| **📊 Check the bill** — one look at your spend | `token-stats` | All agents, all models, one line each. Only models with data show up — no noise |
-| **📡 Watch it live** — see context fill up in real time | `token-stats -b hermes --watch` | Per-round delta + current context ratio. Alerts before things get tight, tells you when to `/new` |
-| **📅 Compare periods** — did today burn more than yesterday? | `--today --compare --a today --b yesterday` | Any time range aggregation, side-by-side comparison with diff. Trends at a glance |
-| **💾 Export** — save stats for records | `--export` | Interactive directory + format selection (JSON/CSV). Cross-platform paths |
-
-**Zero dependencies** — pure Python stdlib, no pip install needed. macOS / Linux / Windows supported.
+| Feature | Command | Description |
+|---------|---------|-------------|
+| **Token stats** — by time range | `token-stats -b hermes --today` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
+| **Live monitor** — context tracking | `token-stats -b hermes --watch` | Per-round delta + cumulative, warns above 90%. macOS / Linux / Windows |
+| **Compare** — side-by-side periods | `--compare --a today --b yesterday` | Any time range, multi-model comparison with diff column |
+| **Export** — JSON / CSV | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
+| **Model detect** — proxy API verification | `token-stats -b <name>` | Auto-detects 69 models from 13 providers by actual API response name |
 
 ---
 
@@ -99,15 +98,17 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 > `cd ~` ensures the skill installs to your home directory (always writable on all OSes).
 > If `python` is not found, try `python3` (Microsoft Store Python uses `python3`).
 > If you get `can't open file '...~...'`, see: [PowerShell path expansion](#ps-tilde).
+>
+> `setup` automatically adds `~/.local/bin` to your system PATH. **Open a new terminal** for it to take effect.
 
-That's it. Run `token-stats` from any terminal.
+That's it. Open a new terminal and run `token-stats`.
 
 ### Verify Installation
 
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.2.8
+# Output: token-stats v2.3.0
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -490,7 +491,8 @@ All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, 
 | Command | Description |
 |---------|-------------|
 | `clawhub install agent-usage-stats` | Install from ClawHub |
-| `token-stats --setup` | Create global command at `~/.local/bin/token-stats` |
+| `token-stats --setup` | Create global command + auto-add to PATH |
+| `token-stats --uninstall` | Remove global command + auto-clean PATH |
 
 > 💡 All commands above are also available via `token-stats --help`.
 
@@ -545,24 +547,15 @@ Prefix matching is supported: `claude-opus-4-7-20250219` → 200K, `gpt-4.1-prev
 
 ## Uninstall
 
-**macOS / Linux:**
 ```bash
+# Step 1: Clean up global command + PATH (automatic)
+token-stats --uninstall
+
+# Step 2: Remove skill files
 clawhub uninstall agent-usage-stats
-rm -f ~/.local/bin/token-stats
-
-# Clean up old aliases (if you previously set alias token-stats=...)
-grep "alias token-stats" ~/.zshrc ~/.bashrc 2>/dev/null || echo "No old aliases found"
-
-# If any found, remove them (macOS: sed -i '', Linux: sed -i)
-sed -i '' '/alias token-stats/d' ~/.zshrc 2>/dev/null || sed -i '/alias token-stats/d' ~/.zshrc
-source ~/.zshrc
 ```
 
-**Windows (PowerShell):**
-```powershell
-clawhub uninstall agent-usage-stats
-Remove-Item -Force ~\.local\bin\token-stats.cmd
-```
+> `--uninstall` automatically removes the wrapper, cleans the PATH entry, and deletes config files. Works on all platforms.
 
 ---
 
@@ -638,38 +631,27 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 
 #### ❓ `token-stats` command not found
 
-**Cause: `~/.local/bin/` is not in PATH.**
+**Cause 1: Haven't run `setup` yet** → Follow the install steps above.
 
-**macOS (default zsh):**
+**Cause 2: Ran `setup` but haven't opened a new terminal** → `setup` writes PATH to system config. Open a new terminal for it to take effect.
+
+**Cause 3: `setup` PATH write failed** → Re-run `setup` and check for errors. If needed, add PATH manually:
+
+**macOS (zsh):**
 ```bash
-echo $PATH | grep .local/bin
-# If not found:
 echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.zshrc
 source ~/.zshrc
-# Or run directly:
-~/.local/bin/token-stats --version
 ```
 
-**Linux (default bash):**
+**Linux (bash):**
 ```bash
-echo $PATH | grep .local/bin
-# If not found:
 echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 source ~/.bashrc
-# Or run directly:
-~/.local/bin/token-stats --version
 ```
 
-**Windows (PowerShell):**
+**Windows (PowerShell, current session only):**
 ```powershell
-# Check
-$env:PATH -split ';' | Select-String '.local'
-# If not found, add for current session:
 $env:PATH += ';' + "$env:USERPROFILE\.local\bin"
-# Or permanently (as admin):
-[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';' + "$env:USERPROFILE\.local\bin", 'User')
-# Or run directly:
-& "$env:USERPROFILE\.local\bin\token-stats.cmd" --version
 ```
 
 #### ❓ `Permission denied` when running `token-stats`
