@@ -132,8 +132,9 @@ clawhub install agent-usage-stats
 
 # 第 2 步：创建全局命令（自动适配安装路径）
 TOKEN_STATS=$(find ~ -maxdepth 5 -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null | head -1) && python3 "$TOKEN_STATS" setup
-# ⚠️ 如果报错，见下方 → [安装文件路径异常排查](#setup-not-found)
 ```
+
+> 执行 `token-stats --version`，如果命令找不到，参考：[安装文件路径异常排查](#setup-not-found)
 
 好了。以后在终端直接敲 `token-stats` 就能用。
 
@@ -451,7 +452,10 @@ token-stats -b claude-code --watch 2   # 2 秒刷新一次
 2. **响应越来越慢** — 模型处理 1M 上下文比 100K 慢得多，你能感觉到打字后等更久才出第一个字
 3. **模型静默丢消息** — 超过上下文上限后，模型会丢弃最旧的消息，但你**不会收到任何提示**。问"刚刚说的还记不记得？"时模型可能自信地编一个假答案
 
-> 💡 **建议策略**：上下文占比超过 **60%** 时考虑 `/new`，超过 **90%** 强烈建议 `/new`。关键信息（偏好、项目结构、配置）通过记忆或笔记带走，新会话轻装上阵。
+> 💡 **建议策略**：
+> - 超过 **60%** → 先尝试 `/compact`（压缩上下文，比 `/new` 快且保留关键信息）
+> - 超过 **90%** → 强烈建议 `/compact` 或 `/new`
+> - 关键信息（偏好、项目结构、配置）通过记忆或笔记带走
 
 ### 查看本机装了哪些 Agent
 

@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.2.5"
+VERSION = "2.2.6"
 
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
 sys.stdout.reconfigure(line_buffering=True, encoding="utf-8")
@@ -1725,7 +1725,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
         print()
         print(f"📊 多 Agent 导出 ({date_str})")
         print("═" * 52)
-        grand_ti = grand_to = grand_tc = grand_tca = 0
+        grand_ti = grand_to = grand_tc = grand_tca = grand_today = 0
         for agent, data, today_calls, today_calls_by_model in agent_data_list:
             print(f"\n  🤖 {agent.display_name()}")
             agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
@@ -1765,13 +1765,14 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 print(f"      ─────────────────────────────────────")
                 print(f"      总计 tokens     {fmt_num(tt):>8}")
                 print(f"      总计 + 缓存     {fmt_num(tt + tc):>8}")
-                grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
+                grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca; grand_today += today_calls
             else:
                 pm = agent_models[0] if agent_models else {}
                 grand_ti += pm.get("input", 0)
                 grand_to += pm.get("output", 0)
                 grand_tc += pm.get("cache", 0)
                 grand_tca += pm.get("calls", 0)
+                grand_today += today_calls
 
         # 所有 Agent 总计
         if len(agent_data_list) > 1:
@@ -1781,7 +1782,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
             print(f"    输入 tokens     {fmt_num(grand_ti):>8}")
             print(f"    输出 tokens     {fmt_num(grand_to):>8}")
             print(f"    缓存 tokens     {fmt_num(grand_tc):>8}")
-            print(f"    调用次数        {grand_tca} 次")
+            print(f"    调用次数        {grand_tca} 次 (今日: {grand_today} 次)")
             print(f"    ─────────────────────────────────────")
             print(f"    总计 tokens     {fmt_num(gtt):>8}")
             print(f"    总计 + 缓存     {fmt_num(gtt + grand_tc):>8}")
@@ -1862,6 +1863,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                     "total_output_tokens": grand_to,
                     "total_cache_tokens": grand_tc,
                     "total_calls": grand_tca,
+                    "today_calls": grand_today,
                     "total_tokens": grand_ti + grand_to,
                     "total_with_cache": grand_ti + grand_to + grand_tc,
                 }
@@ -1893,7 +1895,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                                        ti + to, ti + to + tc])
                 if len(agent_data_list) > 1:
                     writer.writerow(["全部", "总计", grand_ti, grand_to, grand_tc, grand_tca,
-                                   "", grand_ti + grand_to, grand_ti + grand_to + grand_tc])
+                                   grand_today, grand_ti + grand_to, grand_ti + grand_to + grand_tc])
 
         print(f"  {filepath}")
         print(f"多 Agent 数据已合并导出")

@@ -86,12 +86,9 @@ clawhub install agent-usage-stats
 
 # Step 2: Create the global command (auto-detect install path)
 TOKEN_STATS=$(find ~ -maxdepth 5 -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null | head -1) && python3 "$TOKEN_STATS" setup
-# ⚠️ If this fails, see → [Install path troubleshooting](#setup-not-found)
 ```
 
-That's it. Now just type `token-stats` in your terminal.
-
-> ⚠️ **Trouble finding the command?** → see [Install successful but `token-stats` command not found](#-install-successful-but-token-stats-command-not-found) in troubleshooting.
+That's it. Run `token-stats --version` to verify. If the command isn't found, see: [Install path troubleshooting](#setup-not-found).
 
 ### Verify Installation
 
@@ -390,7 +387,10 @@ Running without ever starting a fresh session won't crash the model, but has thr
 2. **Response gets slower** — processing 1M context is much slower than 100K; you'll feel the delay before the first character appears
 3. **Model silently forgets** — past the context limit, the oldest messages are quietly dropped with **zero warning**. Ask "remember what we said earlier?" and the model may confidently fabricate an answer
 
-> 💡 **Recommended strategy**: consider `/new` when context exceeds **60%**, strongly recommended above **90%**. Carry key info (preferences, project structure, config) via memory or notes into the fresh session.
+> 💡 **Recommended strategy**:
+> - Above **60%** → try `/compact` first (compresses context, keeps the gist, faster than `/new`)
+> - Above **90%** → `/compact` or `/new` strongly recommended
+> - Carry key info (preferences, project structure, config) via memory or notes
 
 ### See what's installed
 
