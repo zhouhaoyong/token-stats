@@ -84,9 +84,9 @@ clawhub --version   # should show v0.9.x
 # Step 1: Install from ClawHub
 clawhub install agent-usage-stats
 
-# Step 2: Create the global command (setup writes a shell wrapper, no +x needed)
-python3 ~/skills/agent-usage-stats/token-stats.py setup
-# ⚠️ If this path doesn't exist, see → [Install successful but token-stats command not found](#setup-not-found)
+# Step 2: Create the global command (auto-detect install path)
+TOKEN_STATS=$(find ~ -maxdepth 5 -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null | head -1) && python3 "$TOKEN_STATS" setup
+# ⚠️ If this fails, see → [Install path troubleshooting](#setup-not-found)
 ```
 
 That's it. Now just type `token-stats` in your terminal.
@@ -578,10 +578,14 @@ npm install -g clawhub
 npm install -g clawhub --registry=https://registry.npmmirror.com
 ```
 
-<a name="setup-not-found"></a>
-#### ❓ `python3 ~/skills/agent-usage-stats/token-stats.py setup` says file not found
+<a id="setup-not-found"></a>
+#### ❓ Install path troubleshooting
 
-**Cause: ClawHub installed skills in a different directory than `~/skills/`.**
+**When: `python3 ~/skills/.../token-stats.py setup` fails with file not found.**
+
+**Cause 1: OpenClaw workspace detected** → ClawHub installed to `~/.openclaw/workspace/skills/agent-usage-stats/`
+
+**Cause 2: ClawHub installed to a different working directory** → skills are placed in `./skills/` relative to the `clawhub install` working directory.
 
 ```bash
 # Find where token-stats.py actually is
@@ -704,12 +708,12 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 
 ### Data scope
 
-> ⚠️ `token-stats` **only reads local agent data from this machine**.
+> ⚠️ `token-stats` **only reads local data. No cross-machine aggregation.**
 >
-> - If you run Hermes on PC A and Claude Code on PC B, each machine stores and reports its own data
-> - `token-stats` reads disk files, not cloud APIs
-> - To see stats on another machine, install `token-stats` there too
-> - All statistics are per-agent, not a cross-agent total
+> - **Same API key on multiple machines? → Each machine's stats are isolated**
+> - Example: Same key used on PC A and PC B → PC A's `token-stats` only sees PC A's usage
+> - `token-stats` reads disk files — no network calls, no API dashboard queries
+> - To see another machine's stats, install `token-stats` there too
 
 ### API Relay / Proxy Service
 
