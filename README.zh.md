@@ -151,7 +151,7 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.3.3
+# 输出: token-stats v2.3.4
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -581,20 +581,11 @@ token-stats --list-backends
 
 ### Windows + WSL2 用户
 
-如果 Agent 跑在 WSL2 中，`token-stats` 在 Windows 侧运行时通过 `\\wsl.localhost` 路径访问数据。需满足：
+Agent 跑在 WSL2 中时，`token-stats` 在 Windows 侧自动检测并读取数据。即使 Hermes 正在运行（数据库被锁），也会通过 `wsl.exe` 在 WSL 内部读取，输出标注 `(WSL)`。
 
 1. **WSL 发行版需处于运行状态** — 打开一个 WSL 终端即可
-2. **读取时 Agent 可能锁定数据库** — Hermes 运行时 `state.db` 被锁，关闭 Hermes 后可正常读取
-3. **代理冲突** — 如果本机开了 VPN/代理，WSL 网络可能受影响（`wsl: 检测到 localhost 代理配置`），但不影响本地文件访问
-
-> 如果数据读取失败，可以直接在 WSL 内安装 `token-stats`：
-> ```bash
-> wsl ~
-> cd ~
-> clawhub install agent-usage-stats
-> python3 ~/skills/agent-usage-stats/token-stats.py setup
-> token-stats --all
-> ```
+2. **用户名无关联** — 自动探测 WSL 内实际用户目录，与 Windows 登录名无关
+3. **代理不影响** — VPN/代理只影响 WSL 网络，不影响本地文件访问
 
 ### 支持的模型（69 个模型，13 个厂商）
 

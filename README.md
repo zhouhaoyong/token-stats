@@ -107,7 +107,7 @@ That's it. Open a new terminal and run `token-stats`.
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.3.3
+# Output: token-stats v2.3.4
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -519,20 +519,11 @@ Output always starts with `📊 Agent Name`, followed by one line per **model wi
 
 ### Windows + WSL2
 
-If your agent runs inside WSL2, `token-stats` reads data via `\\wsl.localhost` paths when executed from Windows. Requirements:
+When your agent runs inside WSL2, `token-stats` automatically detects and reads data from the Windows side. Even if Hermes is running (database locked), it reads via `wsl.exe` internally; output is labeled `(WSL)`.
 
 1. **WSL distro must be running** — open a WSL terminal first
-2. **Agent may lock the database** — Hermes locks `state.db` while running; close Hermes to read stats
-3. **Proxy conflicts** — VPN/proxy may affect WSL networking (`wsl: localhost proxy detected`), but local file access is unaffected
-
-> If data read fails, install `token-stats` directly inside WSL:
-> ```bash
-> wsl ~
-> cd ~
-> clawhub install agent-usage-stats
-> python3 ~/skills/agent-usage-stats/token-stats.py setup
-> token-stats --all
-> ```
+2. **Username agnostic** — auto-detects the WSL user's home directory, independent of Windows login
+3. **Proxy unaffected** — VPN/proxy only affects WSL networking, not local file access
 
 ### Supported Models (69 models, 13 providers)
 

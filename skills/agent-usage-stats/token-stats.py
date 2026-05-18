@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.3"
+VERSION = "2.3.4"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -159,6 +159,45 @@ def _resolve_path(relative_path):
             except Exception:
                 pass
     return native
+
+
+def _wsl_unc_to_linux(unc_path):
+    """WSL UNC 路径 → (distro, linux_path)。非 WSL 返回 (None, None)。"""
+    p = unc_path.replace("\\", "/")
+    for prefix in ("//wsl.localhost/", "//wsl$/"):
+        if p.startswith(prefix):
+            rest = p[len(prefix):]
+            idx = rest.find("/")
+            if idx > 0:
+                return rest[:idx], "/" + rest[idx + 1:]
+    return None, None
+
+
+def _hermes_collect_via_wsl(db_path):
+    """通过 wsl.exe 在 WSL 内查询 Hermes 数据库，返回 (rows, session_count) 或 (None, 0)。"""
+    import subprocess
+    distro, linux_path = _wsl_unc_to_linux(db_path)
+    if not distro:
+        return None, 0
+    script = (
+        "import sqlite3,json;c=sqlite3.connect(r'%s');c.row_factory=sqlite3.Row;"
+        "cols={r[1] for r in c.execute('PRAGMA table_info(sessions)')};"
+        "has_ac='api_call_count' in cols;has_tc='tool_call_count' in cols;"
+        "ac='api_call_count' if has_ac else '0';tc='tool_call_count' if has_tc else '0';"
+        "rows=[dict(r) for r in c.execute("
+        "f'SELECT model,SUM(input_tokens) inp,SUM(output_tokens) out,SUM(cache_read_tokens) cache,'"
+        "f'SUM('+ac+') calls,SUM('+tc+') tools,COUNT(*) cnt FROM sessions GROUP BY model')];"
+        "sc=c.execute('SELECT COUNT(*) FROM sessions').fetchone()[0];"
+        "c.close();print(json.dumps({'rows':rows,'sc':sc},default=str))"
+    ) % linux_path
+    try:
+        r = subprocess.run(
+            ["wsl.exe", "-d", distro, "--", "python3", "-c", script],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15,
+        )
+        return json.loads(r.stdout.decode("utf-8", errors="ignore"))
+    except Exception:
+        return None, 0
 
 
 # ── 路径配置系统 ──
@@ -934,8 +973,51 @@ class HermesAgent(BaseAgent):
         # WSL 路径可能 UNC 不通但 wsl.exe 已验证存在（_resolve_path 已处理）
         return db != os.path.join(os.path.expanduser("~"), ".hermes", "state.db")
 
+    def _try_wsl_fallback(self, hermes_db, error_msg):
+        """WSL 路径 DB 不可用时，通过 wsl.exe 在 WSL 内读取。"""
+        distro, _ = _wsl_unc_to_linux(hermes_db)
+        if not distro:
+            return None
+        if "locked" not in error_msg.lower() and "unable to open" not in error_msg.lower():
+            return None
+        result = _hermes_collect_via_wsl(hermes_db)
+        if not result or not result.get("rows"):
+            return None
+        rows = result["rows"]
+        per_model_list = []
+        raw_lines = ["📊 Hermes (WSL)"]
+        ti = to = tc = tca = tsess = 0
+        for r in rows:
+            m = r.get("model") or "unknown"
+            inp = int(r.get("inp") or 0)
+            out = int(r.get("out") or 0)
+            cache = int(r.get("cache") or 0)
+            calls = int(r.get("calls") or 0)
+            cnt = int(r.get("cnt") or 0)
+            ti += inp; to += out; tc += cache; tca += calls; tsess += cnt
+            per_model_list.append({"model": m, "input": inp, "output": out, "calls": calls, "cache": cache})
+            line = format_model_line(m, inp, out, cache, calls, session_count=cnt)
+            if line:
+                raw_lines.append(line)
+        raw = "\n".join(raw_lines)
+        stats = {
+            "model": ", ".join(sorted({(r.get("model") or "unknown") for r in rows})),
+            "input_tokens": ti, "output_tokens": to, "cache_read": tc,
+            "api_calls": tca, "total_tokens": ti + to, "session_count": tsess,
+        }
+        return AgentData(name="hermes", display_name="Hermes", stats=stats, raw=raw, per_model=per_model_list)
+
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         hermes_db = _find_hermes_db()
+        try:
+            return self._collect_impl(hermes_db, from_ts, to_ts)
+        except Exception as e:
+            fb = self._try_wsl_fallback(hermes_db, str(e))
+            if fb:
+                return fb
+            raise
+
+    def _collect_impl(self, hermes_db, from_ts, to_ts):
         conn = sqlite3.connect(hermes_db)
         conn.row_factory = sqlite3.Row
 
