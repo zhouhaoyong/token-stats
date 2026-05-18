@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -366,6 +366,36 @@ def parse_time_label(label: str) -> tuple:
 
     # Single date
     return parse_date(s)
+
+
+def _display_width(s: str) -> int:
+    """计算终端显示宽度（CJK 字符算 2 列，ASCII 算 1 列）。"""
+    w = 0
+    for c in s:
+        code = ord(c)
+        if (0x1100 <= code <= 0x115F or    # Hangul Jamo
+            0x2E80 <= code <= 0xA4CF or    # CJK Radicals ~ Yi
+            0xAC00 <= code <= 0xD7A3 or    # Hangul Syllables
+            0xF900 <= code <= 0xFAFF or    # CJK Compatibility Ideographs
+            0xFE30 <= code <= 0xFE4F or    # CJK Compatibility Forms
+            0xFF01 <= code <= 0xFF60 or    # Fullwidth Forms
+            0xFFE0 <= code <= 0xFFE6 or    # Fullwidth Signs
+            0x20000 <= code <= 0x2FFFF or  # CJK Extension
+            0x30000 <= code <= 0x3FFFF):   # CJK Extension
+            w += 2
+        else:
+            w += 1
+    return w
+
+
+def _pad_to(s: str, width: int, align: str = "<") -> str:
+    """按显示宽度填充到指定列宽。"""
+    dw = _display_width(s)
+    pad = max(0, width - dw)
+    if align == ">":
+        return " " * pad + s
+    else:
+        return s + " " * pad
 
 
 def label_to_display(label: str) -> str:
@@ -1992,16 +2022,33 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
     a_disp = label_to_display(a_label)
     b_disp = label_to_display(b_label)
     print(f"\n📊 对比: {a_disp} vs {b_disp}  [{agent.display_name()}]")
-    # 列宽根据标签长度自适应
-    label_w = max(len(b_disp), 12) if len(b_disp) > len(a_disp) else max(len(a_disp), 12)
-    col_model = 28      # 模型列宽（不含前导空格）
-    col_delta = 12      # 变化列宽
-    sep = 3             # " | " 分隔符宽度
-    leading = 2         # "  " 前导空格
-    total_w = leading + col_model + sep + label_w + sep + label_w + sep + col_delta
-    print("═" * total_w)
-    print(f"  {'模型':<{col_model}} | {a_disp:>{label_w}} | {b_disp:>{label_w}} | {'变化':>{col_delta}}")
-    print("─" * total_w)
+
+    # 动态列宽：先扫一遍数据，取各列最宽值
+    col_model = max(_display_width("模型"), max(_display_width(mn) for mn in all_models))
+    col_delta = _display_width("变化")
+    label_w = max(_display_width(a_disp), _display_width(b_disp), 6)
+
+    # 预计算格式化后的数据宽度
+    for mn in all_models:
+        ma = models_a.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+        mb = models_b.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+        ta = ma["input"] + ma["output"]
+        tb = mb["input"] + mb["output"]
+        if ta == 0 and tb == 0:
+            continue
+        label_w = max(label_w, _display_width(fmt_num(ta)), _display_width(fmt_num(tb)))
+        delta = tb - ta
+        ds = f"+{fmt_num(delta)}" if delta > 0 else fmt_num(delta) if delta < 0 else "0"
+        col_delta = max(col_delta, _display_width(ds))
+
+    # 总计行也要纳入宽度计算
+    col_model = max(col_model, _display_width("总计"))
+
+    sep_w = _display_width(" | ")
+    total_w = 2 + col_model + sep_w + label_w + sep_w + label_w + sep_w + col_delta
+    print("═" * (total_w // 1))
+    print(f"  {_pad_to('模型', col_model)} | {_pad_to(a_disp, label_w, '>')} | {_pad_to(b_disp, label_w, '>')} | {_pad_to('变化', col_delta, '>')}")
+    print("─" * (total_w // 1))
 
     total_a, total_b = 0, 0
     model_count = 0
@@ -2010,14 +2057,13 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         mb = models_b.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
         ta = ma["input"] + ma["output"]
         tb = mb["input"] + mb["output"]
-        # 跳过两侧均为 0 的模型
         if ta == 0 and tb == 0:
             continue
         total_a += ta
         total_b += tb
         delta = tb - ta
-        delta_str = f"+{fmt_num(delta)}" if delta > 0 else fmt_num(delta) if delta < 0 else "0"
-        print(f"  {mn:<{col_model}} | {fmt_num(ta):>{label_w}} | {fmt_num(tb):>{label_w}} | {delta_str:>{col_delta}}")
+        ds = f"+{fmt_num(delta)}" if delta > 0 else fmt_num(delta) if delta < 0 else "0"
+        print(f"  {_pad_to(mn, col_model)} | {_pad_to(fmt_num(ta), label_w, '>')} | {_pad_to(fmt_num(tb), label_w, '>')} | {_pad_to(ds, col_delta, '>')}")
         model_count += 1
 
     if model_count == 0:
@@ -2025,10 +2071,10 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         print()
         return
 
-    print("─" * total_w)
+    print("─" * (total_w // 1))
     total_delta = total_b - total_a
     total_delta_str = f"+{fmt_num(total_delta)}" if total_delta > 0 else fmt_num(total_delta) if total_delta < 0 else "0"
-    print(f"  {'总计':<{col_model}} | {fmt_num(total_a):>{label_w}} | {fmt_num(total_b):>{label_w}} | {total_delta_str:>{col_delta}}")
+    print(f"  {_pad_to('总计', col_model)} | {_pad_to(fmt_num(total_a), label_w, '>')} | {_pad_to(fmt_num(total_b), label_w, '>')} | {_pad_to(total_delta_str, col_delta, '>')}")
     print()
 
 
