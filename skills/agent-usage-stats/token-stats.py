@@ -54,6 +54,62 @@ VERSION = "2.2.2"
 # 强制 stdout 行缓冲，使 --watch 模式的输出实时可见
 sys.stdout.reconfigure(line_buffering=True)
 
+# ── 路径配置系统 ──
+# 支持 setup 时自动检测 Agent 路径，保存到配置文件
+# 运行时优先读取配置，无配置时回退到标准路径
+
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "token-stats")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "paths.json")
+
+
+def _load_agent_paths() -> dict:
+    """加载已保存的 Agent 数据路径配置"""
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_agent_paths(paths: dict):
+    """保存 Agent 数据路径配置"""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(paths, f, indent=2, ensure_ascii=False)
+
+
+def _scan_all_agent_paths() -> dict:
+    """扫描本机所有 Agent 的数据路径，返回 {agent_name: data_path}"""
+    paths = {}
+    # Hermes
+    for p in [os.path.expanduser("~/.hermes/state.db"),
+              os.path.expanduser("~/.config/hermes/state.db")]:
+        if os.path.exists(p):
+            paths["hermes_db"] = p
+            break
+    for p in [os.path.expanduser("~/.hermes/sessions/sessions.json"),
+              os.path.expanduser("~/.config/hermes/sessions/sessions.json")]:
+        if os.path.exists(p):
+            paths["hermes_sessions"] = p
+            break
+    # Claude Code
+    for p in [os.path.expanduser("~/.claude")]:
+        if os.path.isdir(os.path.join(p, "projects")):
+            paths["claude_dir"] = p
+            break
+    # CodeX
+    for p in [os.path.expanduser("~/.codex")]:
+        if os.path.isdir(p):
+            paths["codex_dir"] = p
+            break
+    # OpenClaw
+    for p in [os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
+              os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json")]:
+        if os.path.exists(p):
+            paths["openclaw_sessions"] = p
+            break
+    return paths
+
 
 # ═══════════════════════════════════════════════════
 #  工具函数
@@ -558,20 +614,30 @@ class BaseAgent(ABC):
 #  Hermes
 # ═══════════════════════════════════════════════════
 
-HERMES_DB = os.path.expanduser("~/.hermes/state.db")
-HERMES_SESSIONS_FILE = os.path.expanduser("~/.hermes/sessions/sessions.json")
+def _find_hermes_db() -> str:
+    """获取 Hermes 数据库路径，优先从配置读取"""
+    cfg = _load_agent_paths()
+    if "hermes_db" in cfg:
+        return cfg["hermes_db"]
+    return os.path.expanduser("~/.hermes/state.db")
+
+
+def _find_hermes_sessions() -> str:
+    """获取 Hermes sessions 文件路径，优先从配置读取"""
+    cfg = _load_agent_paths()
+    if "hermes_sessions" in cfg:
+        return cfg["hermes_sessions"]
+    return os.path.expanduser("~/.hermes/sessions/sessions.json")
 
 
 def _hermes_current_session_id() -> str | None:
     """从 sessions.json 读取当前活跃会话 ID。"""
+    sessions_path = _find_hermes_sessions()
     try:
-        with open(HERMES_SESSIONS_FILE, encoding="utf-8") as f:
+        with open(sessions_path, encoding="utf-8") as f:
             data = json.load(f)
-        # sessions.json 可能是一个 dict，key 是 platform:chat_id
-        # 也可能是有特定结构的 dict
         if not isinstance(data, dict):
             return None
-        # 找到第一个有 session_id 的条目
         for key, val in data.items():
             if isinstance(val, dict) and val.get("session_id"):
                 return val["session_id"]
@@ -591,10 +657,11 @@ class HermesAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return os.path.exists(HERMES_DB)
+        return os.path.exists(_find_hermes_db())
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        conn = sqlite3.connect(HERMES_DB)
+        hermes_db = _find_hermes_db()
+        conn = sqlite3.connect(hermes_db)
         conn.row_factory = sqlite3.Row
 
         if from_ts is not None or to_ts is not None:
@@ -730,7 +797,12 @@ class HermesAgent(BaseAgent):
 #  Claude Code
 # ═══════════════════════════════════════════════════
 
-CLAUDE_DIR = os.path.expanduser("~/.claude")
+def _find_claude_dir() -> str:
+    """获取 Claude Code 目录，优先从配置读取"""
+    cfg = _load_agent_paths()
+    if "claude_dir" in cfg:
+        return cfg["claude_dir"]
+    return os.path.expanduser("~/.claude")
 
 
 class ClaudeCodeAgent(BaseAgent):
@@ -744,7 +816,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return os.path.isdir(os.path.join(CLAUDE_DIR, "projects"))
+        return os.path.isdir(os.path.join(_find_claude_dir(), "projects"))
 
     @staticmethod
     def _ts_in_range(ts_str: str, from_ts: float = None, to_ts: float = None) -> bool:
@@ -764,7 +836,7 @@ class ClaudeCodeAgent(BaseAgent):
             return True  # can't parse → include to be safe
 
     def _find_sessions(self, from_ts: float = None, to_ts: float = None):
-        projects_dir = os.path.join(CLAUDE_DIR, "projects")
+        projects_dir = os.path.join(_find_claude_dir(), "projects")
         if not os.path.isdir(projects_dir):
             return []
         sessions = []
@@ -885,6 +957,17 @@ class ClaudeCodeAgent(BaseAgent):
 # ═══════════════════════════════════════════════════
 
 def _find_codex_db() -> Optional[str]:
+    """获取 CodeX 数据库路径，优先从配置读取"""
+    cfg = _load_agent_paths()
+    if "codex_dir" in cfg:
+        codex_dir = cfg["codex_dir"]
+        if os.path.isdir(codex_dir):
+            dbs = sorted(
+                [f for f in os.listdir(codex_dir) if re.match(r'^state_\d+\.sqlite$', f)],
+                reverse=True
+            )
+            return os.path.join(codex_dir, dbs[0]) if dbs else None
+    # 回退到标准路径
     codex_dir = os.path.expanduser("~/.codex")
     if not os.path.isdir(codex_dir):
         return None
@@ -1024,7 +1107,10 @@ class CodeXAgent(BaseAgent):
 # ═══════════════════════════════════════════════════
 
 def _find_openclaw_sessions() -> Optional[str]:
-    """检测 OpenClaw 会话数据文件，支持多种安装路径"""
+    """检测 OpenClaw 会话数据文件，支持配置 + 多种安装路径"""
+    cfg = _load_agent_paths()
+    if "openclaw_sessions" in cfg:
+        return cfg["openclaw_sessions"]
     candidates = [
         os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
         os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json"),
@@ -1788,6 +1874,18 @@ def main():
                     for al in alias_lines:
                         print(al)
                     print("   删除方法: 手动编辑或用 sed 删除对应行，然后 source ~/.zshrc")
+
+        # ── 扫描并保存 Agent 数据路径 ──
+        agent_paths = _scan_all_agent_paths()
+        if agent_paths:
+            _save_agent_paths(agent_paths)
+            detected = []
+            for key in agent_paths:
+                label = key.replace("_dir", "").replace("_db", "").replace("_sessions", "")
+                detected.append(label.capitalize())
+            print(f"✅ 已自动检测并保存 Agent 路径: {', '.join(sorted(set(detected)))}")
+        else:
+            print("ℹ️  未检测到任何 Agent 数据文件，运行后会自动尝试标准路径")
 
         bin_dir = os.path.dirname(target)
         if bin_dir not in os.environ.get("PATH", "").split(":"):
