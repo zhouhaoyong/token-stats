@@ -90,6 +90,8 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 
 That's it. Now just type `token-stats` in your terminal.
 
+> ⚠️ **Trouble finding the command?** → see [Install successful but command not found](#-install-successful-but-token-stats-command-not-found) in troubleshooting.
+
 ### Verify Installation
 
 ```bash
@@ -630,6 +632,44 @@ mkdir -p ~/Desktop/my-data
 token-stats -b hermes --export
 # Enter: ~/Desktop/my-data
 ```
+
+#### ❓ Install successful but `token-stats` command not found
+
+**Cause:** `clawhub install` placed the files in a non-standard location, but you ran `setup` from `~/skills/` which doesn't exist.
+
+This is common when **`~/.openclaw/` exists** — ClawHub auto-detects the workspace and installs to `~/.openclaw/workspace/skills/agent-usage-stats/` instead of `~/skills/`.
+
+**Diagnose:**
+```bash
+find ~ -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null
+```
+
+**Fix:**
+```bash
+# Run setup from the actual location
+python3 /path/to/agent-usage-stats/token-stats.py setup
+
+# Then token-stats becomes available
+token-stats --version
+```
+
+To relocate to `~/skills/` instead:
+```bash
+clawhub uninstall agent-usage-stats
+cd /tmp && clawhub install agent-usage-stats
+cp -r /tmp/skills/agent-usage-stats ~/skills/
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+```
+
+#### ❓ OpenClaw shows calls but zero tokens
+
+**Cause:** Some OpenClaw versions (especially older builds on Linux) don't record token usage (`input`/`output` counts) in their data files. The tool detects session files and model names, but the `usage` field in `.jsonl` is populated as `0`.
+
+**Notable data:** 0 tokens + non-zero call count → confirms usage recording is missing at the source.
+
+**Resolution:** This is an OpenClaw data recording limitation, not a token-stats bug. Token-stats reads whatever the agent wrote down. Options:
+- Upgrade OpenClaw to a newer version that records token usage
+- No workaround available in token-stats itself
 
 #### ❓ `--compare` shows no data for both periods
 

@@ -90,12 +90,14 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 
 That's it. Now just type `token-stats` in your terminal.
 
+> ⚠️ **Trouble finding the command?** → see [Install successful but command not found](#-install-successful-but-token-stats-command-not-found) in troubleshooting.
+
 ### Verify Installation
 
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.0.7
+# Output: token-stats v2.1.1
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -138,6 +140,42 @@ token-stats --version
 
 ---
 
+## Common Commands
+
+The ones you'll actually reach for day-to-day:
+
+```bash
+# 📊 View all agents (current stats)
+token-stats --all
+
+# 📊 View all agents — today only
+token-stats --all --today
+
+# 📊 View all agents — this month (e.g. May 2026)
+token-stats --all --from 2026-05-01 --to 2026-05-31
+
+# 📤 Export → just add --export (interactive dir/format picker)
+token-stats --all --export
+token-stats --all --today --export
+token-stats --all --from 2026-05-01 --to 2026-05-31 --export
+
+# 🎯 Single agent
+token-stats -b hermes
+token-stats -b hermes --today
+token-stats -b hermes --from 2026-05-01 --to 2026-05-31
+
+# ⚖️ Today vs yesterday
+token-stats -b hermes --compare --a today --b yesterday
+
+# 👀 Live context monitor (alerts when context is nearly full)
+token-stats -b hermes --watch
+
+# 👀 Pick an agent interactively, then enter watch mode
+token-stats --watch
+```
+
+> Replace `hermes` with any agent name (`claude-code` / `codex` / `openclaw`).
+
 ## Usage
 
 ### Quick view
@@ -151,6 +189,9 @@ token-stats -b hermes
 token-stats -b claude-code
 token-stats -b codex
 token-stats -b openclaw
+
+# Multiple agents at once (comma-separated)
+token-stats -b hermes,claude-code
 
 # All agents at once
 token-stats --all
@@ -240,9 +281,61 @@ token-stats -b hermes --last-7d --export
 
 # Export custom date range
 token-stats -b hermes --from 2025-01-01 --to 2025-01-31 --export
+
+# Export multiple agents (comma-separated)
+token-stats -b hermes,claude-code --export
+
+# Export all installed agents
+token-stats --all --export
+
+# Multi-agent + time range (all combinations work)
+token-stats -b hermes,claude-code --today --export          # Multiple agents, today only
+token-stats --all --today --export                          # All agents, today only
+token-stats --all --from 2025-01-01 --to 2025-01-31 --export  # All agents, custom period
+token-stats -b hermes,claude-code --yesterday --export      # Multiple agents, yesterday
+token-stats -b hermes,claude-code --week --export           # Multiple agents, this week
 ```
 
 Flow: shows stats → prompts for directory → prompts for JSON or CSV.
+
+**Single agent export shows per-model breakdown + a "Total" row when multiple models exist:**
+```text
+📊 Hermes — Export (2026-05-18)
+════════════════════════════════════════════════════
+  deepseek-v4-flash
+    context          178.4K /   1.05M (17.0%)
+    input tokens     115.1K
+    output tokens     63.3K
+    cache tokens     18.10M
+    calls            192 (today: 24)
+    ─────────────────────────────────────
+    total tokens     178.4K
+    total + cache    18.28M
+
+  claude-sonnet-4
+    context           85.5K /  200.0K (42.8%)
+    input tokens      52.2K
+    output tokens     33.3K
+    cache tokens      2.00M
+    calls             10 (today: 24)
+    ─────────────────────────────────────
+    total tokens      85.5K
+    total + cache     2.09M
+
+  ──────────────────────────────────────────    ← auto-added for multi-model
+  Total
+    input tokens     167.3K
+    output tokens     96.6K
+    cache tokens     20.10M
+    calls            202
+    ─────────────────────────────────────
+    total tokens     263.9K
+    total + cache    20.36M
+```
+
+**Multi-agent export (`--all --export` or `-b a,b --export`):**
+Each agent is shown separately, with a grand total across all agents.
+JSON uses an `"agents": [...]` structure; CSV adds an `Agent` column.
 
 Supports all 3 OS path formats:
 - macOS/Linux: `~/Desktop`, `/tmp/data`
@@ -261,14 +354,24 @@ token-stats -b claude-code --watch 2   # 2-second interval
 
 Polls every N seconds (default 5). Ctrl+C to stop and see a summary with final state + total delta.
 
-Example output:
+Example output (single model):
 ```text
 ── [05:30:45] +347 tokens (+1 calls) ──
   deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input +333/82.6K tokens | output +14/36.6K tokens | cache +103.0K/7.93M tokens | calls +1/115
-  📅 today  input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22
+  deepseek-v4-flash | input 480.0K tokens | output 120.0K tokens | total 600.0K tokens | cache 8.50M tokens | calls 22       ← today totals
 
-── [05:30:50] no change ──
-  deepseek-v4-flash | context 119.2K/1.05M (11.4% ✅) | input 82.6K tokens | output 36.6K tokens | cache 7.93M tokens | calls 115
+── [05:30:50] no change ──                                     ← single line only when nothing changed
+```
+
+Example output (multiple models, per-model today totals + total row):
+```text
+── [05:30:55] +1.2K tokens (+2 calls) ──
+  deepseek-v4-flash | context 178.4K/1.05M (17.0% ✅) | input +968/115.1K tokens | output +232/63.3K tokens | ...
+  claude-sonnet-4    | context 85.5K/200K (42.8%) | input +87/52.2K tokens | output +40/33.2K tokens | ...
+  deepseek-v4-flash | input 481.2K tokens | output 120.2K tokens | total 601.4K tokens | cache 8.81M tokens | calls 24
+  claude-sonnet-4   | input 200.1K tokens | output 50.1K tokens | total 250.2K tokens | cache 2.01M tokens | calls 11
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  Total             | input 681.3K tokens | output 170.3K tokens | total 851.6K tokens | cache 10.82M tokens | calls 35
 ```
 
 **What live monitoring tells you:**
@@ -346,6 +449,8 @@ All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, 
 | `token-stats -b <name> --yesterday --export` | Export yesterday's stats |
 | `token-stats -b <name> --last-7d --export` | Export last 7 days |
 | `token-stats -b <name> --from X --to Y --export` | Export custom date range |
+| `token-stats -b <name1>,<name2> --export` | Export multiple agents (comma-separated) |
+| `token-stats --all --export` | Export all installed agents |
 
 ### Live Monitoring
 
@@ -360,6 +465,8 @@ All commands accept `-b <name>` where `<name>` can be: `hermes`, `claude-code`, 
 | Command | Description |
 |---------|-------------|
 | `token-stats --all` | Show stats for ALL installed agents |
+| `token-stats -b <name1>,<name2>` | Show multiple agents at once (comma-separated) |
+| `token-stats --all --export` | Export stats for all agents |
 | `token-stats --list-backends` | List installed agents (check mark or cross) |
 
 ### Setup & Maintenance
@@ -526,6 +633,44 @@ token-stats -b hermes --export
 # Enter: ~/Desktop/my-data
 ```
 
+#### ❓ Install successful but `token-stats` command not found
+
+**Cause:** `clawhub install` placed the files in a non-standard location, but you ran `setup` from `~/skills/` which doesn't exist.
+
+This is common when **`~/.openclaw/` exists** — ClawHub auto-detects the workspace and installs to `~/.openclaw/workspace/skills/agent-usage-stats/` instead of `~/skills/`.
+
+**Diagnose:**
+```bash
+find ~ -name "token-stats.py" -path "*/agent-usage-stats/*" 2>/dev/null
+```
+
+**Fix:**
+```bash
+# Run setup from the actual location
+python3 /path/to/agent-usage-stats/token-stats.py setup
+
+# Then token-stats becomes available
+token-stats --version
+```
+
+To relocate to `~/skills/` instead:
+```bash
+clawhub uninstall agent-usage-stats
+cd /tmp && clawhub install agent-usage-stats
+cp -r /tmp/skills/agent-usage-stats ~/skills/
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+```
+
+#### ❓ OpenClaw shows calls but zero tokens
+
+**Cause:** Some OpenClaw versions (especially older builds on Linux) don't record token usage (`input`/`output` counts) in their data files. The tool detects session files and model names, but the `usage` field in `.jsonl` is populated as `0`.
+
+**Notable data:** 0 tokens + non-zero call count → confirms usage recording is missing at the source.
+
+**Resolution:** This is an OpenClaw data recording limitation, not a token-stats bug. Token-stats reads whatever the agent wrote down. Options:
+- Upgrade OpenClaw to a newer version that records token usage
+- No workaround available in token-stats itself
+
 #### ❓ `--compare` shows no data for both periods
 
 **Possible cause:** neither period has session records. Check with `--today` first.
@@ -538,3 +683,41 @@ token-stats -b hermes --export
 > - `token-stats` reads disk files, not cloud APIs
 > - To see stats on another machine, install `token-stats` there too
 > - All statistics are per-agent, not a cross-agent total
+
+### API Relay / Proxy Service
+
+> If you access LLMs through an **API relay (中转站)**, note the following caveats.
+
+token-stats relies on the `usage` object returned by the real API. The data flow is:
+
+```
+Your Agent → Relay → Real API
+                         ↓
+           Real API returns usage object
+                         ↓
+           Relay forwards the response to your Agent
+                         ↓
+           Your Agent writes to local storage
+                         ↓
+           token-stats reads from local storage
+```
+
+**Accurate stats require:** the relay to pass through the original API response **as-is** (including the `usage` field). Most mainstream relays do this.
+
+**Stats may be inaccurate if:** the relay:
+- Removes the `usage` field
+- Tampers with token counts (e.g. inflating usage)
+- Replaces model names
+
+token-stats **only records what it receives** — it does not verify data against the real API. It is a **local ledger** that records what your Agent wrote down, not the upstream API's billing invoice.
+
+> If you suspect relay data is inaccurate, compare token-stats output with the relay's billing dashboard. Discrepancies suggest data may have been modified.
+
+---
+
+token-stats is fundamentally an **open-source transparency tool**. It does not judge relay services — it makes token consumption **auditable and verifiable**:
+
+- For **honest relays**: users can cross-check and build trust
+- For **dishonest relays**: data discrepancies expose the problem
+
+Whether you connect directly or through a relay, users deserve to know their actual consumption. token-stats doesn't take sides — it just keeps the books.
