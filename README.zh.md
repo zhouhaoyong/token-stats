@@ -185,6 +185,42 @@ token-stats --version
 
 ---
 
+## 常用命令
+
+日常用得最多的几条，复制即用：
+
+```bash
+# 📊 查看本机所有 Agent 统计
+token-stats --all
+
+# 📊 查看今天所有 Agent 数据
+token-stats --all --today
+
+# 📊 查看本月所有 Agent 数据（例：2026年5月）
+token-stats --all --from 2026-05-01 --to 2026-05-31
+
+# 📤 要导出 → 加 --export（交互式选择目录和格式）
+token-stats --all --export
+token-stats --all --today --export
+token-stats --all --from 2026-05-01 --to 2026-05-31 --export
+
+# 🎯 指定单个 Agent
+token-stats -b hermes
+token-stats -b hermes --today
+token-stats -b hermes --from 2026-05-01 --to 2026-05-31
+
+# ⚖️ 今日 vs 昨日对比
+token-stats -b hermes --compare --a today --b yesterday
+
+# 👀 实时监控上下文（边聊边看，快满屏了会预警）
+token-stats -b hermes --watch
+
+# 👀 交互式选 Agent 后进入实时监控
+token-stats --watch
+```
+
+> 把 `hermes` 换成你自己的 Agent 名字（`claude-code` / `codex` / `openclaw`）即可。
+
 ## 用法
 
 ### 快速查看

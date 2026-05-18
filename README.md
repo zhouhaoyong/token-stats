@@ -138,6 +138,42 @@ token-stats --version
 
 ---
 
+## Common Commands
+
+The ones you'll actually reach for day-to-day:
+
+```bash
+# 📊 View all agents (current stats)
+token-stats --all
+
+# 📊 View all agents — today only
+token-stats --all --today
+
+# 📊 View all agents — this month (e.g. May 2026)
+token-stats --all --from 2026-05-01 --to 2026-05-31
+
+# 📤 Export → just add --export (interactive dir/format picker)
+token-stats --all --export
+token-stats --all --today --export
+token-stats --all --from 2026-05-01 --to 2026-05-31 --export
+
+# 🎯 Single agent
+token-stats -b hermes
+token-stats -b hermes --today
+token-stats -b hermes --from 2026-05-01 --to 2026-05-31
+
+# ⚖️ Today vs yesterday
+token-stats -b hermes --compare --a today --b yesterday
+
+# 👀 Live context monitor (alerts when context is nearly full)
+token-stats -b hermes --watch
+
+# 👀 Pick an agent interactively, then enter watch mode
+token-stats --watch
+```
+
+> Replace `hermes` with any agent name (`claude-code` / `codex` / `openclaw`).
+
 ## Usage
 
 ### Quick view
