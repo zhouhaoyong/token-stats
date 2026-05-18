@@ -1106,11 +1106,35 @@ class CodeXAgent(BaseAgent):
 #  OpenClaw
 # ═══════════════════════════════════════════════════
 
-def _find_openclaw_sessions() -> Optional[str]:
-    """检测 OpenClaw 会话数据文件，支持配置 + 多种安装路径"""
+def _find_openclaw_sessions_dir() -> Optional[str]:
+    """获取 OpenClaw 会话目录（含 .jsonl 文件），优先从配置读取"""
     cfg = _load_agent_paths()
     if "openclaw_sessions" in cfg:
-        return cfg["openclaw_sessions"]
+        p = cfg["openclaw_sessions"]
+        # 可能是 sessions.json 路径（取父目录）或目录路径
+        if p.endswith(".json"):
+            d = os.path.dirname(p)
+            if os.path.isdir(d):
+                return d
+        elif os.path.isdir(p):
+            return p
+    candidates = [
+        os.path.expanduser("~/.openclaw/agents/main/sessions"),
+        os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions"),
+    ]
+    for d in candidates:
+        if os.path.isdir(d):
+            return d
+    return None
+
+
+def _find_openclaw_sessions() -> Optional[str]:
+    """检测 OpenClaw 会话索引文件（sessions.json），用于 detect()"""
+    cfg = _load_agent_paths()
+    if "openclaw_sessions" in cfg:
+        p = cfg["openclaw_sessions"]
+        if os.path.exists(p):
+            return p
     candidates = [
         os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json"),
         os.path.expanduser("~/ai-testing-lab/openclaw/data/agents/main/sessions/sessions.json"),
@@ -1119,6 +1143,70 @@ def _find_openclaw_sessions() -> Optional[str]:
         if os.path.exists(path):
             return path
     return None
+
+
+def _openclaw_parse_jsonl(fpath: str, from_ts: float = None, to_ts: float = None) -> dict:
+    """解析单个 OpenClaw .jsonl 文件，返回 {model: {input, output, cache, calls}}"""
+    per_model = {}
+    current_model = "unknown"
+    current_provider = ""
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                t = msg.get("type", "")
+
+                # 跟踪模型切换
+                if t == "model_change":
+                    p = msg.get("provider", "")
+                    m = msg.get("modelId", "")
+                    if m:
+                        current_model = f"{m} ({p})" if p else m
+                        current_provider = p
+                    continue
+
+                # 仅处理 assistant 消息
+                if t != "message":
+                    continue
+                mrole = msg.get("message", {}).get("role", "")
+                if mrole != "assistant":
+                    continue
+
+                # 时间过滤
+                ts_str = msg.get("timestamp", "")
+                if ts_str and (from_ts is not None or to_ts is not None):
+                    try:
+                        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        msg_ts = dt.timestamp()
+                        if from_ts is not None and msg_ts < from_ts:
+                            continue
+                        if to_ts is not None and msg_ts > to_ts:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                usage = msg.get("message", {}).get("usage", {})
+                inp = usage.get("input", 0) or 0
+                out = usage.get("output", 0) or 0
+                cache = usage.get("cacheRead", 0) or 0
+
+                # 获取本次消息的模型名（优先级：msg.model > current_model）
+                model = msg.get("message", {}).get("model", "") or current_model
+                if model not in per_model:
+                    per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                per_model[model]["input"] += inp
+                per_model[model]["output"] += out
+                per_model[model]["cache"] += cache
+                per_model[model]["calls"] += 1
+    except Exception:
+        return {}
+    return per_model
 
 
 class OpenClawAgent(BaseAgent):
@@ -1132,9 +1220,84 @@ class OpenClawAgent(BaseAgent):
 
     @staticmethod
     def detect() -> bool:
-        return _find_openclaw_sessions() is not None
+        return _find_openclaw_sessions_dir() is not None or _find_openclaw_sessions() is not None
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
+        # ── 模式 A：优先从 .jsonl 文件解析（含真实 usage 数据） ──
+        sess_dir = _find_openclaw_sessions_dir()
+        if sess_dir is not None:
+            try:
+                jsonl_files = sorted(
+                    [f for f in os.listdir(sess_dir)
+                     if f.endswith(".jsonl") and not f.endswith(".trajectory.jsonl")]
+                )
+            except OSError:
+                jsonl_files = []
+            if jsonl_files:
+                per_model_data = {}
+                for fname in jsonl_files:
+                    fpath = os.path.join(sess_dir, fname)
+                    pm = _openclaw_parse_jsonl(fpath, from_ts, to_ts)
+                    for model, d in pm.items():
+                        if model not in per_model_data:
+                            per_model_data[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                        per_model_data[model]["input"] += d["input"]
+                        per_model_data[model]["output"] += d["output"]
+                        per_model_data[model]["calls"] += d["calls"]
+                        per_model_data[model]["cache"] += d["cache"]
+
+                if not per_model_data:
+                    return AgentData(
+                        name="openclaw", display_name="OpenClaw",
+                        stats={}, raw="OpenClaw: 尚无会话" if from_ts is None else "OpenClaw: 该时间段内无会话"
+                    )
+
+                total_input = sum(d["input"] for d in per_model_data.values())
+                total_output = sum(d["output"] for d in per_model_data.values())
+                total_cache = sum(d["cache"] for d in per_model_data.values())
+                total_calls = sum(d["calls"] for d in per_model_data.values())
+
+                models_sorted = sorted(per_model_data.keys())
+                per_model_list = []
+                raw_lines = ["📊 OpenClaw"]
+                for mn in models_sorted:
+                    md = per_model_data[mn]
+                    per_model_list.append({
+                        "model": mn, "input": md["input"], "output": md["output"],
+                        "calls": md["calls"], "cache": md["cache"],
+                    })
+                    cw = detect_context(mn)
+                    if from_ts is not None or to_ts is not None:
+                        line = format_model_line(mn, md["input"], md["output"], md["cache"],
+                                                  md["calls"], session_count=md["calls"])
+                    else:
+                        line = format_model_line(mn, md["input"], md["output"], md["cache"],
+                                                  md["calls"], context_window=cw)
+                    if line:
+                        raw_lines.append(line)
+
+                raw = "\n".join(raw_lines)
+                model_list = ", ".join(models_sorted)
+                stats = {
+                    "model": model_list,
+                    "input_tokens": total_input,
+                    "output_tokens": total_output,
+                    "cache_read": total_cache,
+                    "api_calls": total_calls,
+                    "total_tokens": total_input + total_output,
+                    "session_count": len(jsonl_files),
+                }
+                if from_ts is None and to_ts is None:
+                    first_model = models_sorted[0] if models_sorted else "unknown"
+                    cw = detect_context(first_model)
+                    stats["context_window"] = cw
+                    stats["context_pct"] = round((total_input + total_output) / cw * 100, 1) if cw else 0
+
+                return AgentData(name="openclaw", display_name="OpenClaw",
+                                 stats=stats, raw=raw, per_model=per_model_list)
+            # 有目录但无 .jsonl → 降级读 sessions.json
+
+        # ── 模式 B：从 sessions.json 读取（回退方案） ──
         oc_path = _find_openclaw_sessions()
         if oc_path is None:
             return AgentData(
@@ -1173,54 +1336,61 @@ class OpenClawAgent(BaseAgent):
                     stats={}, raw="OpenClaw: 尚无会话" if from_ts is None else "OpenClaw: 该时间段内无会话"
                 )
 
-            total_input = sum(s.get("inputTokens", 0) for s in agents)
-            total_output = sum(s.get("outputTokens", 0) for s in agents)
-            total_cache = sum(s.get("cacheRead", 0) for s in agents)
+            # 按模型分组聚合（sessions.json 中每个 session 有 model 字段）
+            per_model_data = {}
+            for s in agents:
+                model = s.get("model", "unknown")
+                provider = s.get("modelProvider", "")
+                model_display = f"{model} ({provider})" if provider else model
+                inp = s.get("inputTokens", 0) or 0
+                out = s.get("outputTokens", 0) or 0
+                cache = s.get("cacheRead", 0) or 0
+                if model_display not in per_model_data:
+                    per_model_data[model_display] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                per_model_data[model_display]["input"] += inp
+                per_model_data[model_display]["output"] += out
+                per_model_data[model_display]["cache"] += cache
+                per_model_data[model_display]["calls"] += 1
+
+            total_input = sum(d["input"] for d in per_model_data.values())
+            total_output = sum(d["output"] for d in per_model_data.values())
+            total_cache = sum(d["cache"] for d in per_model_data.values())
 
             latest = max(agents, key=lambda s: s.get("startedAt", 0) or s.get("updatedAt", 0))
-            model = latest.get("model", "unknown")
-            provider = latest.get("modelProvider", "")
-            model_display = f"{model}" if not provider else f"{model} ({provider})"
             context = latest.get("contextTokens", DEFAULT_CONTEXT)
 
-            per_model_list = [{"model": model, "input": total_input, "output": total_output,
-                               "calls": len(agents), "cache": total_cache}]
-
-            if from_ts is not None or to_ts is not None:
-                # 时间段模式：无上下文占比
-                oline = format_model_line(
-                    model_display, total_input, total_output, total_cache, len(agents),
-                    session_count=len(agents)
-                )
-                raw = "📊 OpenClaw" + ("\n" + oline if oline else "")
-                stats = {
-                    "model": model,
-                    "input_tokens": total_input,
-                    "output_tokens": total_output,
-                    "cache_read": total_cache,
-                    "total_tokens": total_input + total_output,
-                    "context_window": context,
-                    "agent_count": len(agents),
-                }
-            else:
-                # 当前模式：显示上下文占比
+            models_sorted = sorted(per_model_data.keys())
+            per_model_list = []
+            raw_lines = ["📊 OpenClaw"]
+            for mn in models_sorted:
+                md = per_model_data[mn]
+                per_model_list.append({
+                    "model": mn, "input": md["input"], "output": md["output"],
+                    "calls": md["calls"], "cache": md["cache"],
+                })
                 cw = context
-                oline = format_model_line(
-                    model_display, total_input, total_output, total_cache, len(agents),
-                    context_window=cw,
-                    extra=f"{len(agents)} 个 Agent" if len(agents) > 1 else None
-                )
-                raw = "📊 OpenClaw" + ("\n" + oline if oline else "")
-                stats = {
-                    "model": model,
-                    "input_tokens": total_input,
-                    "output_tokens": total_output,
-                    "cache_read": total_cache,
-                    "total_tokens": total_input + total_output,
-                    "context_window": cw,
-                    "context_pct": round((total_input + total_output) / cw * 100, 1) if cw else 0,
-                    "agent_count": len(agents),
-                }
+                if from_ts is not None or to_ts is not None:
+                    line = format_model_line(mn, md["input"], md["output"], md["cache"],
+                                              md["calls"], session_count=md["calls"])
+                else:
+                    line = format_model_line(mn, md["input"], md["output"], md["cache"],
+                                              md["calls"], context_window=cw)
+                if line:
+                    raw_lines.append(line)
+
+            raw = "\n".join(raw_lines)
+            model_list = ", ".join(models_sorted)
+            stats = {
+                "model": model_list,
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "cache_read": total_cache,
+                "total_tokens": total_input + total_output,
+                "context_window": context,
+                "agent_count": len(agents),
+            }
+            if from_ts is None and to_ts is None:
+                stats["context_pct"] = round((total_input + total_output) / context * 100, 1) if context else 0
 
             return AgentData(name="openclaw", display_name="OpenClaw",
                              stats=stats, raw=raw, per_model=per_model_list)
