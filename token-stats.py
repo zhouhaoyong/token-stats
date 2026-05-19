@@ -2584,53 +2584,67 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
     # 写入 header
     wb.add_row(sheet_name, [(h, HDR_STYLE) for h in headers])
     row_num = 2
-    # 追踪 agent merge ranges
-    agent_ranges = {}  # agent_name -> [start_row, end_row]
-    model_ranges = {}  # (agent_name, model) -> [start_row, end_row]
+    # 追踪 merge ranges：数据行 Agent+Model、合计行 Agent+Model
+    agent_ranges = {}  # agent_name -> (start_row, end_row) — 仅数据行
+    model_ranges = {}  # (agent_name, model) -> (start_row, end_row)
+    subtotal_agent_ranges = {}  # agent_name -> (start_row, end_row) — 合计行 Agent 列
+    subtotal_model_ranges = {}  # agent_name -> (start_row, end_row) — 合计行 Model 列
     current_agent = None
     current_model = None
     agent_start = None
     model_start = None
 
-    subtotal_model_ranges = {}  # agent_name -> (start_row, end_row)
     subtotal_start = None
     subtotal_agent = None
+
+    def _close_data_ranges():
+        nonlocal current_agent, current_model, agent_start, model_start
+        if current_agent is not None:
+            agent_ranges[current_agent] = (agent_start, row_num - 1)
+        if current_model is not None and current_agent is not None:
+            model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
+
+    def _close_subtotal_ranges():
+        nonlocal subtotal_agent, subtotal_start
+        if subtotal_agent is not None and subtotal_start is not None:
+            subtotal_agent_ranges[subtotal_agent] = (subtotal_start, row_num - 1)
+            subtotal_model_ranges[subtotal_agent] = (subtotal_start, row_num - 1)
+            subtotal_agent = None
+            subtotal_start = None
 
     for vals, rtype, ag_name, ag_display, model in rows_data:
         wb.add_row(sheet_name, vals)
         if rtype == 'data':
-            if subtotal_agent is not None and subtotal_start is not None:
-                subtotal_model_ranges[subtotal_agent] = (subtotal_start, row_num - 1)
-                subtotal_agent = None
-                subtotal_start = None
+            _close_subtotal_ranges()
             if ag_name != current_agent:
-                if current_agent is not None:
-                    agent_ranges[current_agent] = (agent_start, row_num - 1)
+                _close_data_ranges()
                 current_agent = ag_name
                 agent_start = row_num
-            if model != current_model or ag_name != current_agent:
+                current_model = None
+                model_start = None
+            if model != current_model or current_model is None:
                 if current_model is not None and current_agent == ag_name:
                     model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
                 current_model = model
                 model_start = row_num
         elif rtype == 'agent_subtotal':
+            _close_data_ranges()
+            current_agent = None
+            current_model = None
             if subtotal_start is None:
                 subtotal_start = row_num
                 subtotal_agent = ag_name
         row_num += 1
 
-    if current_agent is not None:
-        agent_ranges[current_agent] = (agent_start, row_num - 1)
-    if current_model is not None and current_agent is not None:
-        model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
-    if subtotal_agent is not None and subtotal_start is not None:
-        subtotal_model_ranges[subtotal_agent] = (subtotal_start, row_num - 1)
+    _close_subtotal_ranges()
 
     # 构建 merges
     for ag_name, (sr, er) in agent_ranges.items():
         merges.append((sr, 1, er, 1))
     for (ag_name, model), (sr, er) in model_ranges.items():
         merges.append((sr, 2, er, 2))
+    for ag_name, (sr, er) in subtotal_agent_ranges.items():
+        merges.append((sr, 1, er, 1))
     for ag_name, (sr, er) in subtotal_model_ranges.items():
         merges.append((sr, 2, er, 2))
 
