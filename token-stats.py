@@ -2367,18 +2367,18 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
         row_num += 1
     if filtered_models:
         merges.append((ms, 1, row_num - 1, 1))
-    # 空行分隔
-    wb.add_row(agent_display, [('', 0) for _ in range(8)])
-    row_num += 1
-    # 合计行
-    ti = int(sum(pm.get('input', 0) for pm in filtered_models))
-    to = int(sum(pm.get('output', 0) for pm in filtered_models))
-    tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
-    tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
-    wb.add_row(agent_display, [
-        (f'{agent_display} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
-        (tc, TOT_STYLE), (tca, TOT_STYLE),
-        (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+    # 多模型时展示 Agent 合计（单模型则跳过，避免重复）
+    if len(filtered_models) > 1:
+        wb.add_row(agent_display, [('', 0) for _ in range(8)])  # 空行分隔
+        row_num += 1
+        ti = int(sum(pm.get('input', 0) for pm in filtered_models))
+        to = int(sum(pm.get('output', 0) for pm in filtered_models))
+        tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
+        tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
+        wb.add_row(agent_display, [
+            (f'{agent_display} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
+            (tc, TOT_STYLE), (tca, TOT_STYLE),
+            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
     wb.merges[agent_display] = merges
     wb.save(filepath)
 
@@ -2413,15 +2413,15 @@ def _write_xlsx_multi_simple(filepath, results):
             ti += inp; to += out; tc += cache; tca += calls
             row_num += 1
         merges.append((ms, 1, row_num - 1, 1))
-        # 空行分隔
-        wb.add_row('多Agent统计', [('', 0) for _ in range(8)])
-        row_num += 1
-        # Agent 合计
-        wb.add_row('多Agent统计', [
-            (f'{agent.display_name()} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE),
-            (to, TOT_STYLE), (tc, TOT_STYLE), (tca, TOT_STYLE),
-            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
-        row_num += 1
+        # 多模型时展示 Agent 合计
+        if len(agent_models) > 1:
+            wb.add_row('多Agent统计', [('', 0) for _ in range(8)])  # 空行分隔
+            row_num += 1
+            wb.add_row('多Agent统计', [
+                (f'{agent.display_name()} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE),
+                (to, TOT_STYLE), (tc, TOT_STYLE), (tca, TOT_STYLE),
+                (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+            row_num += 1
         grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
     # 全部总计
     if total_agents > 1:
@@ -2477,34 +2477,34 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
         merges.append((ms, 2, row_num - 1, 2))  # Model merge
     if all_models:
         merges.append((ag_ms, 1, row_num - 1, 1))  # Agent merge
-    # 空行分隔
-    empty_row = [('', 0) for _ in range(4 + month_count)]
-    wb.add_row(agent_display, empty_row)
-    row_num += 1
-    # 合计行
-    gt = row_num
-    for metric in _METRIC_ORDER:
-        vals = [
-            ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
-            ('', TOT_STYLE),
-            (_METRIC_LABELS[metric], TOT_STYLE)]
-        gt_all = 0
-        for m_label in all_months:
-            ct = 0
-            for model in all_models:
-                md = monthly_data[m_label].get(model, {})
-                if metric == 'total':
-                    ct += md.get('input', 0) + md.get('output', 0)
-                elif metric == 'total_with_cache':
-                    ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
-                else:
-                    ct += md.get(metric, 0)
-            gt_all += ct
-            vals.append((int(ct), TOT_STYLE))
-        vals.append((int(gt_all), TOT_STYLE))
-        wb.add_row(agent_display, vals)
+    # 多模型时展示合计（单模型跳过避免重复）
+    if len(all_models) > 1:
+        empty_row = [('', 0) for _ in range(4 + month_count)]
+        wb.add_row(agent_display, empty_row)
         row_num += 1
-    merges.append((gt, 1, row_num - 1, 1))
+        gt = row_num
+        for metric in _METRIC_ORDER:
+            vals = [
+                ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
+                ('', TOT_STYLE),
+                (_METRIC_LABELS[metric], TOT_STYLE)]
+            gt_all = 0
+            for m_label in all_months:
+                ct = 0
+                for model in all_models:
+                    md = monthly_data[m_label].get(model, {})
+                    if metric == 'total':
+                        ct += md.get('input', 0) + md.get('output', 0)
+                    elif metric == 'total_with_cache':
+                        ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                    else:
+                        ct += md.get(metric, 0)
+                gt_all += ct
+                vals.append((int(ct), TOT_STYLE))
+            vals.append((int(gt_all), TOT_STYLE))
+            wb.add_row(agent_display, vals)
+            row_num += 1
+        merges.append((gt, 1, row_num - 1, 1))
     wb.merges[agent_display] = merges
     wb.save(filepath)
 
@@ -2546,29 +2546,29 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
                     vals.append((int(v), 0))
                 vals.append((int(tot), 0))
                 rows_data.append((vals, 'data', agent_name, agent_display, model))
-        # 空行分隔
-        rows_data.append(([('', 0)] * (4 + month_count), 'separator', agent_name, agent_display, None))
-        # Agent 合计行
-        for metric in _METRIC_ORDER:
-            vals = [
-                ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
-                ('', TOT_STYLE),
-                (_METRIC_LABELS[metric], TOT_STYLE)]
-            ag_total = 0
-            for m_label in all_months:
-                ct = 0
-                for model in all_models:
-                    md = monthly_data[m_label].get(model, {})
-                    if metric == 'total':
-                        ct += md.get('input', 0) + md.get('output', 0)
-                    elif metric == 'total_with_cache':
-                        ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
-                    else:
-                        ct += md.get(metric, 0)
-                ag_total += ct
-                vals.append((int(ct), TOT_STYLE))
-            vals.append((int(ag_total), TOT_STYLE))
-            rows_data.append((vals, 'agent_subtotal', agent_name, agent_display, None))
+        # 多模型时展示 Agent 合计
+        if len(all_models) > 1:
+            rows_data.append(([('', 0)] * (4 + month_count), 'separator', agent_name, agent_display, None))
+            for metric in _METRIC_ORDER:
+                vals = [
+                    ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
+                    ('', TOT_STYLE),
+                    (_METRIC_LABELS[metric], TOT_STYLE)]
+                ag_total = 0
+                for m_label in all_months:
+                    ct = 0
+                    for model in all_models:
+                        md = monthly_data[m_label].get(model, {})
+                        if metric == 'total':
+                            ct += md.get('input', 0) + md.get('output', 0)
+                        elif metric == 'total_with_cache':
+                            ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                        else:
+                            ct += md.get(metric, 0)
+                    ag_total += ct
+                    vals.append((int(ct), TOT_STYLE))
+                vals.append((int(ag_total), TOT_STYLE))
+                rows_data.append((vals, 'agent_subtotal', agent_name, agent_display, None))
 
     # 写入 header
     wb.add_row(sheet_name, [(h, HDR_STYLE) for h in headers])
@@ -2657,8 +2657,9 @@ def _write_csv_simple(filepath, agent_name, agent_display, filtered_models):
             model = pm.get('model', 'unknown')
             w.writerow([agent_display, model, inp, out, cache, calls, inp + out, inp + out + cache])
             ti += inp; to += out; tc += cache; tca += calls
-        w.writerow([])
-        w.writerow([f'{agent_display} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+        if len(filtered_models) > 1:
+            w.writerow([])
+            w.writerow([f'{agent_display} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
 
 
 def _write_csv_multi_simple(filepath, results):
@@ -2683,8 +2684,9 @@ def _write_csv_multi_simple(filepath, results):
                 model = pm.get('model', 'unknown')
                 w.writerow([agent.display_name(), model, inp, out, cache, calls, inp + out, inp + out + cache])
                 ti += inp; to += out; tc += cache; tca += calls
-            w.writerow([])
-            w.writerow([f'{agent.display_name()} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+            if len(agent_models) > 1:
+                w.writerow([])
+                w.writerow([f'{agent.display_name()} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
             grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
         if total_agents > 1:
             w.writerow([])
@@ -2716,10 +2718,11 @@ def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_mo
                     row.append(int(v))
                 row.append(int(tot))
                 w.writerow(row)
-        # 空行分隔 + 合计行
-        w.writerow([])
-        for metric in _METRIC_ORDER:
-            row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+        # 多模型时展示合计
+        if len(all_models) > 1:
+            w.writerow([])
+            for metric in _METRIC_ORDER:
+                row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
             gt_all = 0
             for m_label in all_months:
                 ct = 0
@@ -2764,25 +2767,26 @@ def _write_csv_multi_monthly(filepath, agent_order, all_months):
                         row.append(int(v))
                     row.append(int(tot))
                     w.writerow(row)
-            # 空行分隔 + Agent 合计
-            w.writerow([])
-            for metric in _METRIC_ORDER:
-                row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
-                ag_total = 0
-                for m_label in all_months:
-                    ct = 0
-                    for model in all_models:
-                        md = monthly_data[m_label].get(model, {})
-                        if metric == 'total':
-                            ct += md.get('input', 0) + md.get('output', 0)
-                        elif metric == 'total_with_cache':
-                            ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
-                        else:
-                            ct += md.get(metric, 0)
-                    ag_total += ct
-                    row.append(int(ct))
-                row.append(int(ag_total))
-                w.writerow(row)
+            # 多模型时展示 Agent 合计
+            if len(all_models) > 1:
+                w.writerow([])
+                for metric in _METRIC_ORDER:
+                    row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+                    ag_total = 0
+                    for m_label in all_months:
+                        ct = 0
+                        for model in all_models:
+                            md = monthly_data[m_label].get(model, {})
+                            if metric == 'total':
+                                ct += md.get('input', 0) + md.get('output', 0)
+                            elif metric == 'total_with_cache':
+                                ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                            else:
+                                ct += md.get(metric, 0)
+                        ag_total += ct
+                        row.append(int(ct))
+                    row.append(int(ag_total))
+                    w.writerow(row)
         # 全部总计
         if len(agent_order) > 1:
             w.writerow([])
