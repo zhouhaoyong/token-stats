@@ -3227,7 +3227,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
 # ═══════════════════════════════════════════════════
 
 def run_compare(agent: BaseAgent, a_label: str, b_label: str):
-    """对比两个时间段的统计"""
+    """对比两个时间段的统计 — 按模型 × 指标完整对比"""
     a_start, a_end = parse_time_label(a_label)
     b_start, b_end = parse_time_label(b_label)
 
@@ -3248,58 +3248,84 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
     b_disp = label_to_display(b_label)
     print(f"\n📊 对比: {a_disp} vs {b_disp}  [{agent.display_name()}]")
 
-    # 动态列宽：先扫一遍数据，取各列最宽值
-    col_model = max(_display_width("模型"), max(_display_width(mn) for mn in all_models))
-    col_delta = _display_width("变化")
-    label_w = max(_display_width(a_disp), _display_width(b_disp), 6)
+    # 构建对齐行列表：每个 (模型, 指标) 一行
+    rows = []
+    def _delta(va, vb):
+        d = vb - va
+        return f"+{fmt_num(d)}" if d > 0 else fmt_num(d) if d < 0 else "0"
 
-    # 预计算格式化后的数据宽度
+    grand_ai = grand_ao = grand_ac = grand_acall = grand_bi = grand_bo = grand_bc = grand_bcall = 0
     for mn in all_models:
         ma = models_a.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
         mb = models_b.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
-        ta = ma["input"] + ma["output"]
-        tb = mb["input"] + mb["output"]
-        if ta == 0 and tb == 0:
+        ai = ma.get("input", 0) or 0
+        ao = ma.get("output", 0) or 0
+        ac = ma.get("cache", 0) or 0
+        a_calls = ma.get("calls", 0) or 0
+        a_total = ai + ao
+        a_total_cache = a_total + ac
+        bi = mb.get("input", 0) or 0
+        bo = mb.get("output", 0) or 0
+        bc = mb.get("cache", 0) or 0
+        b_calls = mb.get("calls", 0) or 0
+        b_total = bi + bo
+        b_total_cache = b_total + bc
+        if a_total == 0 and b_total == 0:
             continue
-        label_w = max(label_w, _display_width(fmt_num(ta)), _display_width(fmt_num(tb)))
-        delta = tb - ta
-        ds = f"+{fmt_num(delta)}" if delta > 0 else fmt_num(delta) if delta < 0 else "0"
-        col_delta = max(col_delta, _display_width(ds))
+        grand_ai += ai; grand_ao += ao; grand_ac += ac; grand_acall += a_calls
+        grand_bi += bi; grand_bo += bo; grand_bc += bc; grand_bcall += b_calls
 
-    # 总计行也要纳入宽度计算
-    col_model = max(col_model, _display_width("总计"))
+        metrics = [
+            ("入", ai, bi),
+            ("出", ao, bo),
+            ("缓", ac, bc),
+            ("总计", a_total, b_total),
+            ("总计(含缓存)", a_total_cache, b_total_cache),
+            ("调用", a_calls, b_calls),
+        ]
+        for i, (metric_name, va, vb) in enumerate(metrics):
+            cols = ["" if i != 0 else mn, metric_name,
+                    fmt_num(va), fmt_num(vb), _delta(va, vb)]
+            rows.append(cols)
 
-    sep_w = _display_width(" | ")
-    total_w = 2 + col_model + sep_w + label_w + sep_w + label_w + sep_w + col_delta
-    print("═" * (total_w // 1))
-    print(f"  {_pad_to('模型', col_model)} | {_pad_to(a_disp, label_w, '>')} | {_pad_to(b_disp, label_w, '>')} | {_pad_to('变化', col_delta, '>')}")
-    print("─" * (total_w // 1))
+    # Agent 合计
+    model_count = len(rows) // len(_METRIC_ORDER) if rows else 0
+    if model_count > 1:
+        grand_a_total = grand_ai + grand_ao
+        grand_b_total = grand_bi + grand_bo
+        grand_a_total_cache = grand_a_total + grand_ac
+        grand_b_total_cache = grand_b_total + grand_bc
+        metrics = [
+            ("入", grand_ai, grand_bi),
+            ("出", grand_ao, grand_bo),
+            ("缓", grand_ac, grand_bc),
+            ("总计", grand_a_total, grand_b_total),
+            ("总计(含缓存)", grand_a_total_cache, grand_b_total_cache),
+            ("调用", grand_acall, grand_bcall),
+        ]
+        for i, (metric_name, va, vb) in enumerate(metrics):
+            cols = ["" if i != 0 else "合计", metric_name,
+                    fmt_num(va), fmt_num(vb), _delta(va, vb)]
+            rows.append(cols)
 
-    total_a, total_b = 0, 0
-    model_count = 0
-    for mn in all_models:
-        ma = models_a.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
-        mb = models_b.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
-        ta = ma["input"] + ma["output"]
-        tb = mb["input"] + mb["output"]
-        if ta == 0 and tb == 0:
-            continue
-        total_a += ta
-        total_b += tb
-        delta = tb - ta
-        ds = f"+{fmt_num(delta)}" if delta > 0 else fmt_num(delta) if delta < 0 else "0"
-        print(f"  {_pad_to(mn, col_model)} | {_pad_to(fmt_num(ta), label_w, '>')} | {_pad_to(fmt_num(tb), label_w, '>')} | {_pad_to(ds, col_delta, '>')}")
-        model_count += 1
-
-    if model_count == 0:
+    if not rows:
         print("  (两侧均无有效数据)")
         print()
         return
 
-    print("─" * (total_w // 1))
-    total_delta = total_b - total_a
-    total_delta_str = f"+{fmt_num(total_delta)}" if total_delta > 0 else fmt_num(total_delta) if total_delta < 0 else "0"
-    print(f"  {_pad_to('总计', col_model)} | {_pad_to(fmt_num(total_a), label_w, '>')} | {_pad_to(fmt_num(total_b), label_w, '>')} | {_pad_to(total_delta_str, col_delta, '>')}")
+    aligned = _align_rows(rows)
+    # 打印：前两列 + 两个数值列 + 变化列
+    print("=" * 86)
+    headers = ["模型", "指标", f"{a_disp}", f"{b_disp}", "变化"]
+    header_w = [max(_display_width(h), _display_width(aligned[0][i]) if aligned else 0) for i, h in enumerate(headers)]
+    # pad headers
+    for i, h in enumerate(headers):
+        aligned[0][i] = _pad_to(h, header_w[i] if i >= 2 else 0)
+    print(f"  {_pad_to('模型', _display_width('模型'))} | {'指标':<4} | {_pad_to(a_disp, max(_display_width(a_disp), 10), '>')} | {_pad_to(b_disp, max(_display_width(b_disp), 10), '>')} | {'变化':>8}")
+    print("─" * 86)
+    for row in aligned:
+        print(f"  {' | '.join(row)}")
+    print("─" * 86)
     print()
 
 
