@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -336,8 +336,9 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
     if len(models) == 1:
         m, i, o, c, ca = models[0]
         t = i + o
-        parts = [f"输入 {fmt_num_fn(i)}",
-                 f"输出 {fmt_num_fn(o)}",
+        parts = [f"入 {fmt_num_fn(i)}",
+                 f"出 {fmt_num_fn(o)}",
+                 f"缓 {fmt_num_fn(c)}",
                  f"总计/+缓存 {fmt_num_fn(t)}/{fmt_num_fn(c)}",
                  f"调用 {ca} 次"]
         lines.append(f"  📅 今日 | {' | '.join(parts)}")
@@ -346,17 +347,18 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
         for m, i, o, c, ca in models:
             t = i + o
             cols = [
-                f"输入 {fmt_num_fn(i)}",
-                f"输出 {fmt_num_fn(o)}",
+                f"入 {fmt_num_fn(i)}",
+                f"出 {fmt_num_fn(o)}",
+                f"缓 {fmt_num_fn(c)}",
                 f"总计/+缓存 {fmt_num_fn(t)}/{fmt_num_fn(c)}",
                 f"调用 {ca} 次",
             ]
             rows.append((m, cols))
-        tt = ti + to
         cols_total = [
-            f"输入 {fmt_num_fn(ti)}",
-            f"输出 {fmt_num_fn(to)}",
-            f"总计/+缓存 {fmt_num_fn(tt)}/{fmt_num_fn(tc)}",
+            f"入 {fmt_num_fn(ti)}",
+            f"出 {fmt_num_fn(to)}",
+            f"缓 {fmt_num_fn(tc)}",
+            f"总计/+缓存 {fmt_num_fn(ti + to)}/{fmt_num_fn(tc)}",
             f"调用 {tca} 次",
         ]
         rows.append(("今日合计", cols_total))
@@ -720,13 +722,15 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
     if context_window:
         pct = round(total / context_window * 100, 1) if context_window else 0
         parts.append(f"上下文 {fmt_num(total)}/{fmt_num(context_window)} ({fmt_pct(pct)})")
-    if inp > 0 or out > 0 or total > 0:
-        if context_window:
-            parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
-        else:
-            parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
-        parts.append(f"输入 {fmt_num(inp)}")
-        parts.append(f"输出 {fmt_num(out)}")
+        parts.append(f"入 {fmt_num(inp)}")
+        parts.append(f"出 {fmt_num(out)}")
+        parts.append(f"缓 {fmt_num(cache)}")
+        parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
+    else:
+        parts.append(f"入 {fmt_num(inp)}")
+        parts.append(f"出 {fmt_num(out)}")
+        parts.append(f"缓 {fmt_num(cache)}")
+        parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
     if calls > 0 and session_count != calls:
         parts.append(f"调用 {calls} 次")
     if session_count:
@@ -832,15 +836,16 @@ class BaseAgent(ABC):
             for mn, mv in bl_models.items():
                 total = mv["input"] + mv["output"]
                 cols = [mn]
+                cache_val = mv.get('cache', 0)
                 if self._has_live_context:
                     cw = detect_context(mn)
                     pct = round(total / cw * 100, 1) if cw else 0
                     cols.append(_progress_bar(pct))
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                else:
-                    cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(mv.get('cache', 0))}")
                 cols.append(f"入 {fmt_num(mv['input'])}")
                 cols.append(f"出 {fmt_num(mv['output'])}")
+                cols.append(f"缓 {fmt_num(cache_val)}")
+                cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache_val)}")
                 cols.append(f"调用 {mv['calls']}")
                 init_rows.append(cols)
                 has_data = True
@@ -939,25 +944,24 @@ class BaseAgent(ABC):
                         continue
 
                     cols = [mn]
+                    cache_v = mv.get('cache', 0)
                     if self._has_live_context:
                         cw = detect_context(mn)
                         pct = round(total / cw * 100, 1) if cw else 0
                         cols.append(_progress_bar(pct))
                         cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                    else:
-                        cols.append(f"总计 {fmt_num(total)}")
-
                     if has_delta:
                         cols.append(f"+{fmt_num(d_in)}入/{fmt_num(mv['input'])}")
                         cols.append(f"+{fmt_num(d_out)}出/{fmt_num(mv['output'])}")
                         if any_cache_now:
-                            cols.append(f"+{fmt_num(d_cache)}存/{fmt_num(mv.get('cache', 0))}")
+                            cols.append(f"+{fmt_num(d_cache)}缓/{fmt_num(cache_v)}")
                         cols.append(f"+{d_calls}调用")
                     else:
                         cols.append(f"入 {fmt_num(mv['input'])}")
                         cols.append(f"出 {fmt_num(mv['output'])}")
                         if any_cache_now:
-                            cols.append(f"存 {fmt_num(mv.get('cache', 0))}")
+                            cols.append(f"缓 {fmt_num(cache_v)}")
+                        cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache_v)}")
                         cols.append(f"调用 {mv['calls']}")
 
                     delta_rows.append((cols, has_delta, mn, mv))
@@ -991,13 +995,14 @@ class BaseAgent(ABC):
                         ti += i; to += o; tc += c; tca += ca
                         t = i + o
                         cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                                f"缓 {fmt_num(c)}",
                                 f"总计/+缓存 {fmt_num(t)}/{fmt_num(c)}", f"调用 {ca}"]
                         today_rows.append(cols)
                     if today_rows:
                         if len(today_models) > 1:
-                            t = ti + to
                             sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
-                                       f"总计/+缓存 {fmt_num(t)}/{fmt_num(tc)}", f"调用 {tca}"]
+                                       f"缓 {fmt_num(tc)}",
+                                       f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(tc)}", f"调用 {tca}"]
                             today_rows.append(sum_row)
                         aligned = _align_rows(today_rows)
                         for row in aligned:
@@ -1022,22 +1027,20 @@ class BaseAgent(ABC):
         # 最终累计状态
         if bl_models:
             print("  最终状态:")
-            final_has_cache = any(mv.get("cache", 0) for mv in bl_models.values())
             final_rows = []
             for mn, mv in sorted(bl_models.items()):
                 total = mv["input"] + mv["output"]
+                cache_v = mv.get("cache", 0)
                 cols = [mn]
                 if self._has_live_context:
                     cw = detect_context(mn)
                     pct = round(total / cw * 100, 1) if cw else 0
                     cols.append(_progress_bar(pct))
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                else:
-                    cols.append(f"总计 {fmt_num(total)}")
                 cols.append(f"入 {fmt_num(mv['input'])}")
                 cols.append(f"出 {fmt_num(mv['output'])}")
-                if final_has_cache:
-                    cols.append(f"存 {fmt_num(mv.get('cache', 0))}")
+                cols.append(f"缓 {fmt_num(cache_v)}")
+                cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache_v)}")
                 cols.append(f"调用 {mv['calls']}")
                 final_rows.append(cols)
             aligned = _align_rows(final_rows)
@@ -1061,14 +1064,15 @@ class BaseAgent(ABC):
                     ti += i; to += o; tc += c; tca += ca
                     t = i + o
                     cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                            f"缓 {fmt_num(c)}",
                             f"总计/+缓存 {fmt_num(t)}/{fmt_num(c)}", f"调用 {ca}"]
                     today_rows.append(cols)
                 if today_rows:
                     print(f"\n  ╌╌╌╌╌ 📅 今日累计 ╌╌╌╌╌")
                     if len(today_models) > 1:
-                        t = ti + to
                         sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
-                                   f"总计/+缓存 {fmt_num(t)}/{fmt_num(tc)}", f"调用 {tca}"]
+                                   f"缓 {fmt_num(tc)}",
+                                   f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(tc)}", f"调用 {tca}"]
                         today_rows.append(sum_row)
                     aligned = _align_rows(today_rows)
                     for row in aligned:
@@ -1228,7 +1232,7 @@ class HermesAgent(BaseAgent):
             raise
 
     def _collect_impl(self, hermes_db, from_ts, to_ts):
-        conn = sqlite3.connect(hermes_db)
+        conn = sqlite3.connect(hermes_db, timeout=10)
         conn.row_factory = sqlite3.Row
 
         # ── schema 兼容：检测旧版 Hermes 缺少的列 ──
@@ -1593,7 +1597,7 @@ class CodeXAgent(BaseAgent):
                 stats={}, raw="CodeX: 未检测到数据库文件"
             )
         try:
-            conn = sqlite3.connect(db)
+            conn = sqlite3.connect(db, timeout=5)
             conn.row_factory = sqlite3.Row
 
             if from_ts is not None or to_ts is not None:
@@ -2201,11 +2205,13 @@ class _XLSXWriter:
                 ref = f'{self._col_letter(col_idx)}{row_idx}'
                 if isinstance(val, str):
                     idx = self._add_str(val)
-                    ET.SubElement(row_el, _xml_tag('c'), r=ref, t='s', s=str(style)).append(
-                        ET.Element(_xml_tag('v'), text=str(idx)))
+                    v_el = ET.Element(_xml_tag('v'))
+                    v_el.text = str(idx)
+                    ET.SubElement(row_el, _xml_tag('c'), r=ref, t='s', s=str(style)).append(v_el)
                 elif isinstance(val, (int, float)):
-                    ET.SubElement(row_el, _xml_tag('c'), r=ref, s=str(style)).append(
-                        ET.Element(_xml_tag('v'), text=str(int(val))))
+                    v_el = ET.Element(_xml_tag('v'))
+                    v_el.text = str(int(val))
+                    ET.SubElement(row_el, _xml_tag('c'), r=ref, s=str(style)).append(v_el)
         if name in self.merges:
             mc_el = ET.SubElement(ws, _xml_tag('mergeCells'), count=str(len(self.merges[name])))
             for r1, c1, r2, c2 in self.merges[name]:
@@ -2261,10 +2267,16 @@ class _XLSXWriter:
                          '</Relationships>')
             zf.writestr('xl/_rels/workbook.xml.rels', rels_xml)
             zf.writestr('xl/styles.xml', self._build_styles_xml())
-            zf.writestr('xl/sharedStrings.xml', self._build_shared_strings_xml())
+            # 先构建所有 sheet XML（填充 shared strings）
+            sheet_xmls = {}
             for name in self.sheets.keys():
                 safe = name.replace(' ', '')
-                zf.writestr(f'xl/worksheets/{safe}.xml', self._build_sheet_xml(name))
+                sheet_xmls[safe] = self._build_sheet_xml(name)
+            # 再写 shared strings（此时已填充完毕）
+            zf.writestr('xl/sharedStrings.xml', self._build_shared_strings_xml())
+            # 最后写 sheet XML
+            for safe, sxml in sheet_xmls.items():
+                zf.writestr(f'xl/worksheets/{safe}.xml', sxml)
 
 
 HDR_STYLE = 1  # 白字蓝底
@@ -2783,7 +2795,10 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 months = _split_months(from_ts, to_ts)
                 month_labels = [label for label, _, _ in months]
                 agent_order = []
-                for agent, data, today_calls, today_calls_by_model, agent_models in filtered_list:
+                for agent, data, today_calls, today_calls_by_model in agent_data_list:
+                    agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+                    if not agent_models:
+                        continue
                     monthly_data = {}
                     total_months = len(months)
                     for idx, (label, m_start, m_end) in enumerate(months, 1):
@@ -2802,16 +2817,48 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 print(f"  {filepath}")
                 print(f"多 Agent 数据已合并导出")
             else:
+                # 单 Sheet 合并所有 Agent
+                wb = _XLSXWriter()
+                col_widths = {'A': 18, 'B': 22}
+                for i in range(3, 10):
+                    col_widths[wb._col_letter(i)] = 16
+                wb.add_sheet('多Agent统计', col_widths=col_widths)
+                headers = ['Agent', '模型', '输入', '输出', '缓存', '调用', '今日调用', '总计', '总计(含缓存)']
+                wb.add_row('多Agent统计', [(h, HDR_STYLE) for h in headers])
+                grand_ti = grand_to = grand_tc = grand_tca = grand_tday = 0
                 for agent, data, today_calls, today_calls_by_model in agent_data_list:
                     agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
                     if not agent_models:
                         continue
-                    a_filename = f"token-stats_{agent.name()}_{timestamp}.xlsx"
-                    a_filepath = os.path.join(dir_path, a_filename)
-                    _write_xlsx_simple(a_filepath, agent.name(), agent.display_name(),
-                                       agent_models, today_calls_by_model, date_str)
-                    print(f"  {a_filepath}")
-                print(f"多 Agent 数据已分别导出")
+                    ti = to = tc = tca = 0
+                    for pm in agent_models:
+                        inp = pm.get('input', 0)
+                        out = pm.get('output', 0)
+                        cache = pm.get('cache', 0)
+                        calls = pm.get('calls', 0)
+                        model = pm.get('model', 'unknown')
+                        tc_model = today_calls_by_model.get(model, 0)
+                        wb.add_row('多Agent统计', [
+                            agent.display_name(), model, int(inp), int(out), int(cache),
+                            int(calls), tc_model, int(inp + out), int(inp + out + cache)])
+                        ti += inp; to += out; tc += cache; tca += calls
+                    if len(agent_models) > 1:
+                        wb.add_row('多Agent统计', [
+                            ('合计', TOT_STYLE), ('', TOT_STYLE), (int(ti), TOT_STYLE),
+                            (int(to), TOT_STYLE), (int(tc), TOT_STYLE), (int(tca), TOT_STYLE),
+                            (today_calls, TOT_STYLE), (int(ti + to), TOT_STYLE),
+                            (int(ti + to + tc), TOT_STYLE)])
+                    grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca; grand_tday += today_calls
+                if len(agent_data_list) > 1:
+                    gtt = grand_ti + grand_to
+                    wb.add_row('多Agent统计', [
+                        ('全部总计', TOT_STYLE), ('', TOT_STYLE), (int(grand_ti), TOT_STYLE),
+                        (int(grand_to), TOT_STYLE), (int(grand_tc), TOT_STYLE),
+                        (int(grand_tca), TOT_STYLE), (grand_tday, TOT_STYLE),
+                        (int(gtt), TOT_STYLE), (int(gtt + grand_tc), TOT_STYLE)])
+                wb.save(filepath)
+                print(f"  {filepath}")
+                print(f"多 Agent 数据已合并导出")
     except KeyboardInterrupt:
         print()
         print("已取消导出")

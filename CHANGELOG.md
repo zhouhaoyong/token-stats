@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.4.1 (2026-05-19)
+
+### 变更
+- **统一输出风格**：全部输出（快照/增量/今日/累计/导出）均包含独立 `缓` 列 + `总计/+缓存` 合并列
+- **多 Agent 导出合并**：单 Sheet 单 XLSX 文件，含 Agent 小计 + 全部总计
+- **上下文 Agent 优化**：Hermes/OpenClaw 保留上下文进度条 + 统一融入缓存列
+
+### 修复
+- XLSX 导出数据为空（ElementTree text 属性 vs 文本内容 + shared strings 构建顺序）
+- CodeX/Hermes SQLite 连接超时（增加 5s/10s timeout 防 hang）
+- watch 今日合计列统一对齐
+
 ## v2.4.0 (2026-05-19)
 
 ### 新增
