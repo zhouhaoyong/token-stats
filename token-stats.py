@@ -1485,15 +1485,14 @@ class ClaudeCodeAgent(BaseAgent):
         return sorted(sessions, key=lambda x: os.path.getmtime(x[2]), reverse=True)
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        # 缓存策略：仅在带时间筛选时启用（导出场景），watch/快照始终重读磁盘
+        # 缓存策略：带时间筛选时优先用缓存；无筛选时从磁盘重读并更新缓存
         want_cache = from_ts is not None or to_ts is not None
-        if not want_cache:
-            self._cache = None  # watch 模式：清缓存保证数据新鲜
 
         if want_cache and hasattr(self, '_cache') and self._cache is not None:
+            # 带时间筛选 + 缓存存在 → 直接复用（导出场景按月拆分、watch 今日合计）
             messages = self._cache
         else:
-            # 从磁盘重新读取
+            # 从磁盘重新读取并更新缓存
             sessions = self._find_sessions()
             self._cached_session_count = len(sessions)
             self._cached_sub_count = 0
@@ -1536,8 +1535,8 @@ class ClaudeCodeAgent(BaseAgent):
                     except Exception:
                         continue
                 self._cached_project_count = len(projects)
-            if want_cache:
-                self._cache = messages
+            # 总是缓存，方便后续复用（如 watch 模式的今日合计查询）
+            self._cache = messages
 
         # 按时间范围过滤
         per_model_data = {}
