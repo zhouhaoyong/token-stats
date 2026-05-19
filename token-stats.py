@@ -11,11 +11,11 @@ token-stats — 选个 Agent 看它的 token 消耗
 
   时间段查询:
   token-stats -a hermes -t / --today
-  token-stats -a hermes -y / --yesterday
+  token-stats -a hermes --yesterday
   token-stats -a hermes --week
   token-stats -a hermes --last-7d
   token-stats -a hermes -m / --month
-  token-stats -a hermes --year
+  token-stats -a hermes -y / --year
   token-stats -a hermes --from 2025-01-01 --to 2025-01-31
 
   导出:
@@ -856,17 +856,15 @@ class BaseAgent(ABC):
             print("  (暂无数据，等待会话开始...)")
         print()
 
-        # ── 监控循环 ──
+        # ── 监控循环（先采集再 sleep，保证间隔准确）──
         while not stop_event.is_set():
-            if not _interruptible_sleep(interval):
-                break
-            if stop_event.is_set():
-                break
             tick_start = time.monotonic()
             try:
                 data = self.collect()
             except Exception as e:
                 print(f"  ⚠️ {e}")
+                if not _interruptible_sleep(interval):
+                    break
                 continue
 
             now_models = {}
@@ -1429,20 +1427,23 @@ class ClaudeCodeAgent(BaseAgent):
         return sorted(sessions, key=lambda x: os.path.getmtime(x[2]), reverse=True)
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        # 首次调用时读取所有 JSONL 并缓存消息，后续调用直接过滤缓存
-        if not hasattr(self, '_cache'):
-            self._cache = []
-            self._cached_sub_count = 0
-            self._cached_session_count = 0
-            self._cached_project_count = 0
+        # 缓存策略：仅在带时间筛选时启用（导出场景），watch/快照始终重读磁盘
+        want_cache = from_ts is not None or to_ts is not None
+        if not want_cache:
+            self._cache = None  # watch 模式：清缓存保证数据新鲜
 
+        if want_cache and hasattr(self, '_cache') and self._cache is not None:
+            messages = self._cache
+        else:
+            # 从磁盘重新读取
             sessions = self._find_sessions()
             self._cached_session_count = len(sessions)
+            self._cached_sub_count = 0
+            self._cached_project_count = 0
+            messages = []
             projects = set()
 
-            if not sessions:
-                self._cached_project_count = 0
-            else:
+            if sessions:
                 for proj, fname, fpath in sessions:
                     projects.add(proj)
                     try:
@@ -1455,21 +1456,19 @@ class ClaudeCodeAgent(BaseAgent):
                                     msg = json.loads(line)
                                 except json.JSONDecodeError:
                                     continue
-                                # 子代理计数（所有消息类型）
                                 if msg.get("toolUseResult") and "usage" in msg["toolUseResult"]:
                                     self._cached_sub_count += 1
                                 if msg.get("type") != "assistant":
                                     continue
                                 model = msg.get("message", {}).get("model") or msg.get("model", "unknown")
                                 usage = msg.get("message", {}).get("usage") or msg.get("usage", {})
-                                # 预解析时间戳
                                 ts_str = msg.get("timestamp", "")
                                 try:
                                     dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                                     msg_ts = dt.timestamp()
                                 except (ValueError, TypeError):
                                     msg_ts = None
-                                self._cache.append({
+                                messages.append({
                                     'ts': msg_ts,
                                     'model': model,
                                     'input': usage.get('input_tokens', 0),
@@ -1479,10 +1478,12 @@ class ClaudeCodeAgent(BaseAgent):
                     except Exception:
                         continue
                 self._cached_project_count = len(projects)
+            if want_cache:
+                self._cache = messages
 
-        # 从缓存中按时间范围过滤
+        # 按时间范围过滤
         per_model_data = {}
-        for msg in self._cache:
+        for msg in messages:
             if msg['ts'] is not None:
                 if from_ts is not None and msg['ts'] < from_ts:
                     continue
@@ -2321,7 +2322,7 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
     tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
     tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
     wb.add_row(agent_display, [
-        ('合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
+        (f'{agent_display} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
         (tc, TOT_STYLE), (tca, TOT_STYLE),
         (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
     wb.merges[agent_display] = merges
@@ -2420,7 +2421,7 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
     gt = row_num
     for metric in _METRIC_ORDER:
         vals = [
-            ('' if metric != 'input' else '合计', TOT_STYLE),
+            ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
             ('', TOT_STYLE),
             (_METRIC_LABELS[metric], TOT_STYLE)]
         gt_all = 0
@@ -2587,7 +2588,7 @@ def _write_csv_simple(filepath, agent_name, agent_display, filtered_models):
             model = pm.get('model', 'unknown')
             w.writerow([agent_display, model, inp, out, cache, calls, inp + out, inp + out + cache])
             ti += inp; to += out; tc += cache; tca += calls
-        w.writerow(['合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+        w.writerow([f'{agent_display} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
 
 
 def _write_csv_multi_simple(filepath, results):
@@ -2645,7 +2646,7 @@ def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_mo
                 w.writerow(row)
         # 合计行
         for metric in _METRIC_ORDER:
-            row = ['合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+            row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
             gt_all = 0
             for m_label in all_months:
                 ct = 0
@@ -3378,11 +3379,11 @@ def main():
 
   快速时间段:
     token-stats -a <name> -t / --today     今日统计
-    token-stats -a <name> -y / --yesterday 昨日统计
-    token-stats -a <name> --week           本周统计（周一起）
-    token-stats -a <name> --last-7d        最近 7 天
-    token-stats -a <name> -m / --month     本月统计
-    token-stats -a <name> --year           本年统计
+    token-stats -a <name> --yesterday 昨日统计
+    token-stats -a <name> --week      本周统计（周一起）
+    token-stats -a <name> --last-7d   最近 7 天
+    token-stats -a <name> -m / --month 本月统计
+    token-stats -a <name> -y / --year 本年统计
     token-stats -a <name> --from 2025-01-01 --to 2025-01-31  自定义时间段
 
   对比:
@@ -3409,6 +3410,7 @@ def main():
     clawhub install agent-usage-stats  从 ClawHub 安装
     token-stats --setup                创建全局命令 + 自动加入 PATH
     token-stats --uninstall            删除全局命令 + 自动清理 PATH
+    token-stats update                 通过 clawhub update 更新到最新版本
         """,
     )
     parser.add_argument("-v", "--version", action="store_true", help="显示版本号")
@@ -3420,11 +3422,11 @@ def main():
 
     # 时间段
     parser.add_argument("-t", "--today", action="store_true", help="今日统计")
-    parser.add_argument("-y", "--yesterday", action="store_true", help="昨日统计")
+    parser.add_argument("--yesterday", action="store_true", help="昨日统计")
     parser.add_argument("--week", action="store_true", help="本周统计")
     parser.add_argument("--last-7d", action="store_true", help="最近 7 天统计")
     parser.add_argument("-m", "--month", action="store_true", help="本月统计")
-    parser.add_argument("--year", action="store_true", help="本年统计")
+    parser.add_argument("-y", "--year", action="store_true", help="本年统计")
     parser.add_argument("--from", dest="from_date", help="开始日期 (YYYY-MM-DD)")
     parser.add_argument("--to", dest="to_date", help="结束日期 (YYYY-MM-DD)")
 
@@ -3439,14 +3441,17 @@ def main():
     parser.add_argument("--all", action="store_true", help="查看本机所有 Agent 统计")
     parser.add_argument("--setup", action="store_true", help="创建 ~/.local/bin/token-stats 并自动加入 PATH")
     parser.add_argument("--uninstall", action="store_true", help="删除全局命令并清理 PATH")
+    parser.add_argument("--update", action="store_true", help="通过 clawhub update 更新到最新版本")
 
     args = parser.parse_args()
 
-    # 兼容旧用法：token-stats setup / uninstall → 当作 --setup / --uninstall
+    # 兼容旧用法：token-stats setup / uninstall / update → 当作对应 flag
     if args.setup_pos is True or args.setup_pos == "setup":
         args.setup = True
     if args.setup_pos == "uninstall":
         args.uninstall = True
+    if args.setup_pos == "update":
+        args.update = True
 
     # ── version ──
     if args.version:
@@ -3561,6 +3566,33 @@ def main():
 
         print()
         print("卸载完成。如需彻底删除技能文件，请执行: clawhub uninstall agent-usage-stats")
+        return
+
+    # ── update ──
+    if getattr(args, 'update', False):
+        print("⏳ 正在通过 ClawHub 更新 token-stats...")
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["clawhub", "update", "agent-usage-stats"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                timeout=120,
+            )
+            output = result.stdout.decode("utf-8", errors="ignore").strip()
+            if output:
+                print(output)
+            if result.returncode == 0:
+                print("✅ 更新完成，请运行 token-stats --version 确认版本")
+            else:
+                print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: clawhub update agent-usage-stats")
+        except FileNotFoundError:
+            print("❌ 未找到 clawhub CLI，请先安装: npm install -g clawhub")
+            print("   然后手动执行: clawhub update agent-usage-stats")
+        except subprocess.TimeoutExpired:
+            print("⚠️ 更新超时，请检查网络后手动执行: clawhub update agent-usage-stats")
+        except Exception as e:
+            print(f"⚠️ 更新失败: {e}")
+            print("   请手动执行: clawhub update agent-usage-stats")
         return
 
     # ── list-backends ──
