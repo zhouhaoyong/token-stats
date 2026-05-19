@@ -742,6 +742,67 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
     return f"  {model_name} | {' | '.join(parts)}"
 
 
+def _build_aligned_raw(agent_display: str, per_model_list: list,
+                        has_context: bool = False,
+                        extra_footer: str = None) -> str:
+    """从 per_model 数据构建列对齐的原始输出（含 Agent 合计行）。"""
+    if not per_model_list:
+        return f"📊 {agent_display}"
+
+    rows = []
+    ti = to = tc = tca = 0
+    for pm in per_model_list:
+        mn = pm.get("model", "unknown")
+        inp = pm.get("input", 0) or 0
+        out = pm.get("output", 0) or 0
+        cache = pm.get("cache", 0) or 0
+        calls = pm.get("calls", 0) or 0
+        total = inp + out
+        ti += inp; to += out; tc += cache; tca += calls
+
+        cols = [mn]
+        if has_context:
+            cw = detect_context(mn)
+            if cw:
+                pct = round(total / cw * 100, 1) if cw else 0
+                cols.append(_progress_bar(pct))
+                cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
+            else:
+                cols.append("")
+                cols.append(f"{fmt_num(total)}/-")
+        cols.append(f"入 {fmt_num(inp)}")
+        cols.append(f"出 {fmt_num(out)}")
+        cols.append(f"缓 {fmt_num(cache)}")
+        cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
+        if calls > 0:
+            cols.append(f"调用 {calls} 次")
+        rows.append(cols)
+
+    # Agent 合计行
+    if len(per_model_list) > 1:
+        total_all = ti + to
+        subtotal_cols = ["合计"]
+        if has_context:
+            subtotal_cols.append("")
+            subtotal_cols.append("")
+        subtotal_cols.append(f"入 {fmt_num(ti)}")
+        subtotal_cols.append(f"出 {fmt_num(to)}")
+        subtotal_cols.append(f"缓 {fmt_num(tc)}")
+        subtotal_cols.append(f"总计/+缓存 {fmt_num(total_all)}/{fmt_num(tc)}")
+        subtotal_cols.append(f"调用 {tca} 次")
+        rows.append(subtotal_cols)
+
+    aligned = _align_rows(rows)
+    lines = [f"📊 {agent_display}"]
+    for row in aligned:
+        lines.append("  " + " | ".join(row))
+
+    if extra_footer:
+        lines.append("  " + "─" * 36)
+        lines.append(extra_footer)
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════
 #  Agent 基类与数据模型
 # ═══════════════════════════════════════════════════
@@ -1197,7 +1258,6 @@ class HermesAgent(BaseAgent):
                              stats={}, raw=f"{label}: 该时间段内无会话记录", per_model=[])
         rows = result["rows"]
         per_model_list = []
-        raw_lines = ["📊 Hermes (WSL)"]
         ti = to = tc = tca = tsess = 0
         for r in rows:
             m = r.get("model") or "unknown"
@@ -1208,10 +1268,10 @@ class HermesAgent(BaseAgent):
             cnt = int(r.get("cnt") or 0)
             ti += inp; to += out; tc += cache; tca += calls; tsess += cnt
             per_model_list.append({"model": m, "input": inp, "output": out, "calls": calls, "cache": cache})
-            line = format_model_line(m, inp, out, cache, calls, session_count=cnt)
-            if line:
-                raw_lines.append(line)
-        raw = "\n".join(raw_lines)
+        extra_footer = f"  会话: {tsess} 轮"
+        raw = _build_aligned_raw("Hermes (WSL)", per_model_list,
+                                 has_context=True,
+                                 extra_footer=extra_footer)
         stats = {
             "model": ", ".join(sorted({(r.get("model") or "unknown") for r in rows})),
             "input_tokens": ti, "output_tokens": to, "cache_read": tc,
@@ -1286,21 +1346,19 @@ class HermesAgent(BaseAgent):
             total_sessions = sum(r["cnt"] or 0 for r in rows)
 
             per_model_list = []
-            raw_lines = ["📊 Hermes"]
             for r in rows:
                 m = r["model"] or "unknown"
                 inp = r["inp"] or 0
                 out = r["out"] or 0
                 cache = r["cache"] or 0
                 calls = r["calls"] or 0
-                cnt = r["cnt"] or 0
                 per_model_list.append({"model": m, "input": inp, "output": out,
                                         "calls": calls, "cache": cache})
-                line = format_model_line(m, inp, out, cache, calls, session_count=cnt)
-                if line:
-                    raw_lines.append(line)
 
-            raw = "\n".join(raw_lines)
+            extra_footer = f"  会话: {total_sessions} 轮"
+            raw = _build_aligned_raw("Hermes", per_model_list,
+                                     has_context=True,
+                                     extra_footer=extra_footer)
 
             stats = {
                 "model": ", ".join(sorted({r["model"] or "unknown" for r in rows})),
@@ -1527,17 +1585,10 @@ class ClaudeCodeAgent(BaseAgent):
                 "cache": md["cache"],
             })
 
-        raw_lines = ["📊 Claude Code"]
-        for mn in meaningful_models:
-            md = per_model_data[mn]
-            line = format_model_line(
-                mn, md["input"], md["output"], md["cache"], md["calls"],
-            )
-            if line:
-                raw_lines.append(line)
-        raw_lines.append(f"  ────────────────────────────────────")
-        raw_lines.append(f"  子代理: {self._cached_sub_count} 次 | 会话: {self._cached_session_count} 个 | 项目: {self._cached_project_count} 个")
-        raw = "\n".join(raw_lines)
+        extra_footer = f"  子代理: {self._cached_sub_count} 次 | 会话: {self._cached_session_count} 个 | 项目: {self._cached_project_count} 个"
+        raw = _build_aligned_raw("Claude Code", per_model_list,
+                                 has_context=False,
+                                 extra_footer=extra_footer)
 
         stats = {
             "model": ", ".join(models_sorted),
@@ -3239,6 +3290,8 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
     print("═" * 50)
 
     any_data = False
+    grand_ti = grand_to = grand_tc = grand_tca = 0
+    agent_count = 0
     for cls in ALL_AGENTS:
         detected = cls.detect()
         status = "✅" if detected else "❌"
@@ -3253,6 +3306,11 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
                 print(" " * 40, end="\r")
                 if data.stats:
                     any_data = True
+                    grand_ti += data.stats.get("input_tokens", 0) or 0
+                    grand_to += data.stats.get("output_tokens", 0) or 0
+                    grand_tc += data.stats.get("cache_read", 0) or 0
+                    grand_tca += data.stats.get("api_calls", 0) or 0
+                    agent_count += 1
                 print(data.raw)
             except Exception as e:
                 msg = str(e)
@@ -3261,6 +3319,13 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
                 print(f"  ⚠️ 读取失败: {msg}")
         else:
             print("  (未安装)")
+
+    # Grand Total
+    if agent_count > 1:
+        gtt = grand_ti + grand_to
+        print(f"\n{'═' * 50}")
+        print("  全部 Agent 总计")
+        print(f"  入 {fmt_num(grand_ti)} | 出 {fmt_num(grand_to)} | 缓 {fmt_num(grand_tc)} | 总计/+缓存 {fmt_num(gtt)}/{fmt_num(grand_tc)} | 调用 {grand_tca} 次")
 
     if not any_data:
         print("\n（所有 Agent 均无数据）")
@@ -3705,6 +3770,15 @@ def main():
                     print(f"  {agent.display_name()}")
                     print(f"{'─'*50}")
                     print(data.raw)
+                if len(results) > 1:
+                    gti = sum(d.stats.get("input_tokens", 0) or 0 for _, d in results)
+                    gto = sum(d.stats.get("output_tokens", 0) or 0 for _, d in results)
+                    gtc = sum(d.stats.get("cache_read", 0) or 0 for _, d in results)
+                    gtca = sum(d.stats.get("api_calls", 0) or 0 for _, d in results)
+                    gtt = gti + gto
+                    print(f"\n{'═'*50}")
+                    print("  全部 Agent 总计")
+                    print(f"  入 {fmt_num(gti)} | 出 {fmt_num(gto)} | 缓 {fmt_num(gtc)} | 总计/+缓存 {fmt_num(gtt)}/{fmt_num(gtc)} | 调用 {gtca} 次")
             return
         agent = agents[0]
     elif len(installed) == 1:

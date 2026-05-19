@@ -8,8 +8,8 @@
 
 | 功能 | 命令 | 说明 |
 |------|------|------|
-| **Token 消耗统计** — 指定时间范围 | `token-stats -a hermes --month` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
-| **实时监控** — 上下文占比追踪 | `token-stats -a hermes --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
+| **Token 消耗统计** — 指定时间范围 | `token-stats -a claude-code --month` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
+| **实时监控** — 上下文占比追踪 | `token-stats -a claude-code --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
 | **时段对比** — 两个时间段并排比较 | `--compare --a today --b yesterday` | 任意时间段聚合，多模型横向对比，带差值列 |
 | **数据导出** — XLSX / JSON | `--export` | 多 Agent、多时间段组合，交互式选目录；年度按月拆分 |
 | **模型识别** — 中转站 API 校验 | `token-stats -a <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
@@ -133,7 +133,7 @@ token-stats --list-backends
 #   ❌ OpenClaw
 
 # 验证 3：直接看某个 Agent 的统计
-token-stats -a hermes
+token-stats -a claude-code
 # 输出示例:
 # 📊 Hermes
 #   deepseek-v4-flash | 总计/+缓存 62.4K/480.6K | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
@@ -143,9 +143,12 @@ token-stats -a hermes
 
 ## 更新
 
+通过 ClawHub 更新到最新版本：
+
 ```bash
+token-stats update
+# 或
 clawhub update agent-usage-stats
-token-stats --version
 ```
 
 > `update` 原地替换文件，包装器和 PATH 均无需重配。
@@ -164,7 +167,7 @@ token-stats --version
 | 短参数 | 长参数 | 说明 |
 |:---:|---|---|
 | `-t` | `--today` | 今日统计 |
-| `-y` | `--yesterday` | 昨日统计 |
+| `-y` | `--year` | 本年统计 |
 | `-m` | `--month` | 本月统计 |
 | `-w` | `--watch` | 实时监控（默认 5 秒刷新） |
 | `-e` | `--export` | 导出为 XLSX/CSV/JSON（交互式选择） |
@@ -186,7 +189,7 @@ token-stats --all -m
 
 **实时盯着 token 消耗跳动：**
 ```bash
-token-stats -a hermes -w
+token-stats -a claude-code -w
 ```
 
 **导出本月数据存档分析（交互式选择 XLSX/CSV/JSON）：**
@@ -201,12 +204,12 @@ token-stats --all --year -e
 
 **对比本周 vs 上周的用量变化：**
 ```bash
-token-stats -a hermes --compare --a this-week --b last-week
+token-stats -a claude-code --compare --a this-week --b last-week
 ```
 
 **对比本月 vs 上月的用量变化：**
 ```bash
-token-stats -a hermes --compare --a this-month --b last-month
+token-stats -a claude-code --compare --a this-month --b last-month
 ```
 
 **同时查看多个 Agent 的指定时间段：**
@@ -230,7 +233,7 @@ token-stats
 
 跳过菜单，直接查看某个 Agent 的全部历史：
 ```bash
-token-stats -a hermes
+token-stats -a claude-code
 ```
 
 同时查看多个 Agent（逗号分隔）：
@@ -250,42 +253,42 @@ token-stats --all
 
 全部历史快照（默认）：
 ```bash
-token-stats -a hermes
+token-stats -a claude-code
 ```
 
 今日统计：
 ```bash
-token-stats -a hermes -t
+token-stats -a claude-code -t
 ```
 
 昨日统计：
 ```bash
-token-stats -a hermes -y
+token-stats -a claude-code --yesterday
 ```
 
 本周（周一起至今）：
 ```bash
-token-stats -a hermes --week
+token-stats -a claude-code --week
 ```
 
 最近 7 天：
 ```bash
-token-stats -a hermes --last-7d
+token-stats -a claude-code --last-7d
 ```
 
 本月（1 日至今）：
 ```bash
-token-stats -a hermes -m
+token-stats -a claude-code -m
 ```
 
 本年（1 月 1 日至今）：
 ```bash
-token-stats -a hermes --year
+token-stats -a claude-code --year
 ```
 
 自定义日期范围：
 ```bash
-token-stats -a hermes --from 2026-01-01 --to 2026-05-18
+token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
 ```
 
 
@@ -311,7 +314,7 @@ token-stats -a hermes --from 2026-01-01 --to 2026-05-18
 
 默认 5 秒刷新，查看实时消耗：
 ```bash
-token-stats -a hermes -w
+token-stats -a claude-code -w
 ```
 
 自定义刷新间隔（秒）：
@@ -331,32 +334,32 @@ token-stats -a claude-code -w 2
 
 今天 vs 昨天：
 ```bash
-token-stats -a hermes --compare --a today --b yesterday
+token-stats -a claude-code --compare --a today --b yesterday
 ```
 
 本周 vs 上周：
 ```bash
-token-stats -a hermes --compare --a this-week --b last-week
+token-stats -a claude-code --compare --a this-week --b last-week
 ```
 
 本月 vs 上月：
 ```bash
-token-stats -a hermes --compare --a this-month --b last-month
+token-stats -a claude-code --compare --a this-month --b last-month
 ```
 
 今年 vs 去年：
 ```bash
-token-stats -a hermes --compare --a this-year --b last-year
+token-stats -a claude-code --compare --a this-year --b last-year
 ```
 
 两个自定义日期对比：
 ```bash
-token-stats -a hermes --compare --a 2026-01-01 --b 2026-01-15
+token-stats -a claude-code --compare --a 2026-01-01 --b 2026-01-15
 ```
 
 两段日期范围对比：
 ```bash
-token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
 ```
 
 支持对比标签：`today`、`yesterday`、`this-week`、`last-week`、`this-month`、`last-month`、`this-year`、`last-year`、`YYYY-MM-DD`、`YYYY-MM-DD~YYYY-MM-DD`
@@ -368,14 +371,14 @@ token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01
 
 导出当前快照：
 ```bash
-token-stats -a hermes -e
+token-stats -a claude-code -e
 ```
 
 导出指定时间段：
 ```bash
-token-stats -a hermes -t -e           # 今日
-token-stats -a hermes -m -e           # 本月
-token-stats -a hermes --year -e       # 本年（按月拆分）
+token-stats -a claude-code -t -e           # 今日
+token-stats -a claude-code -m -e           # 本月
+token-stats -a claude-code --year -e       # 本年（按月拆分）
 ```
 
 导出所有 Agent：
@@ -386,7 +389,7 @@ token-stats --all --year -e           # 所有 Agent 年度按月拆分
 
 直接指定导出目录（跳过交互式目录选择）：
 ```bash
-token-stats -a hermes -t -e ~/Desktop # 导出今日统计到桌面
+token-stats -a claude-code -t -e ~/Desktop # 导出今日统计到桌面
 ```
 
 ### 各 Agent 的数据怎么看
