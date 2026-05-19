@@ -306,13 +306,24 @@ Initial state:
 ── [10:30:05] no new activity ──
 ```
 
-After Ctrl+C stop:
+After Ctrl+C stop (with session delta + final totals):
 ```
-  📊 Monitoring Summary
+^C
+📊 Monitoring Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Session delta:
+  deepseek-v4-flash | +1.2K in | +200 out | +2.15M cache | +3 calls
+  deepseek-v4-pro   | +15K in  | +5K out  | +3.5M cache  | +8 calls
+  ────────────────────────────────────
+  Today total: +16.2K tokens | +11 calls
+
   Final state:
   deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/8.36M | Calls 349
   deepseek-v4-pro   | In 4.91M | Out 1.19M | Cache 452.69M | Total/+Cache 6.1M/452.69M | Calls 2351
   Subtotal           | In 6.93M | Out 1.27M | Cache 461.05M | Total/+Cache 8.2M/461.05M | Calls 2700
+  ────────────────────────────────────
+  Sub-agents: 17 | Sessions: 20 | Projects: 4
+  Duration: 5m 30s | Ticks: 66
 ```
 
 ### Compare
