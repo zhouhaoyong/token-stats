@@ -235,7 +235,6 @@ token-stats -a claude-code -w
 ```bash
 token-stats -a claude-code --compare --a this-week --b last-week
 ```
-
 **本月 vs 上月对比：**
 ```bash
 token-stats -a claude-code --compare --a this-month --b last-month
