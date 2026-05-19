@@ -2486,7 +2486,7 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
         for metric in _METRIC_ORDER:
             vals = [
                 ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
-                ('', TOT_STYLE),
+                ('' if metric != 'input' else '合计', TOT_STYLE),
                 (_METRIC_LABELS[metric], TOT_STYLE)]
             gt_all = 0
             for m_label in all_months:
@@ -2552,7 +2552,7 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
             for metric in _METRIC_ORDER:
                 vals = [
                     ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
-                    ('', TOT_STYLE),
+                    ('' if metric != 'input' else '合计', TOT_STYLE),
                     (_METRIC_LABELS[metric], TOT_STYLE)]
                 ag_total = 0
                 for m_label in all_months:
@@ -2581,30 +2581,46 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
     agent_start = None
     model_start = None
 
+    subtotal_model_ranges = {}  # agent_name -> (start_row, end_row)
+    subtotal_start = None
+    subtotal_agent = None
+
     for vals, rtype, ag_name, ag_display, model in rows_data:
         wb.add_row(sheet_name, vals)
         if rtype == 'data':
+            if subtotal_agent is not None and subtotal_start is not None:
+                subtotal_model_ranges[subtotal_agent] = (subtotal_start, row_num - 1)
+                subtotal_agent = None
+                subtotal_start = None
             if ag_name != current_agent:
                 if current_agent is not None:
                     agent_ranges[current_agent] = (agent_start, row_num - 1)
                 current_agent = ag_name
                 agent_start = row_num
-            if model != current_model or ag_name != (current_agent if current_agent != ag_name else current_agent):
+            if model != current_model or ag_name != current_agent:
                 if current_model is not None and current_agent == ag_name:
                     model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
                 current_model = model
                 model_start = row_num
+        elif rtype == 'agent_subtotal':
+            if subtotal_start is None:
+                subtotal_start = row_num
+                subtotal_agent = ag_name
         row_num += 1
 
     if current_agent is not None:
         agent_ranges[current_agent] = (agent_start, row_num - 1)
     if current_model is not None and current_agent is not None:
         model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
+    if subtotal_agent is not None and subtotal_start is not None:
+        subtotal_model_ranges[subtotal_agent] = (subtotal_start, row_num - 1)
 
     # 构建 merges
     for ag_name, (sr, er) in agent_ranges.items():
         merges.append((sr, 1, er, 1))
     for (ag_name, model), (sr, er) in model_ranges.items():
+        merges.append((sr, 2, er, 2))
+    for ag_name, (sr, er) in subtotal_model_ranges.items():
         merges.append((sr, 2, er, 2))
 
     # 全部总计
@@ -2722,7 +2738,9 @@ def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_mo
         if len(all_models) > 1:
             w.writerow([])
             for metric in _METRIC_ORDER:
-                row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+                row = [f'{agent_display} 合计' if metric == 'input' else '',
+                       '合计' if metric == 'input' else '',
+                       _METRIC_LABELS[metric]]
             gt_all = 0
             for m_label in all_months:
                 ct = 0
@@ -2771,7 +2789,9 @@ def _write_csv_multi_monthly(filepath, agent_order, all_months):
             if len(all_models) > 1:
                 w.writerow([])
                 for metric in _METRIC_ORDER:
-                    row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+                    row = [f'{agent_display} 合计' if metric == 'input' else '',
+                           '合计' if metric == 'input' else '',
+                           _METRIC_LABELS[metric]]
                     ag_total = 0
                     for m_label in all_months:
                         ct = 0
