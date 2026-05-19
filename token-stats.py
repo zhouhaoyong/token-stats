@@ -3663,7 +3663,9 @@ def main():
         import subprocess
         try:
             result = subprocess.run(
-                ["clawhub", "update", "agent-usage-stats"],
+                ["clawhub", "update", "agent-usage-stats",
+                 "--workdir", os.path.expanduser("~"),
+                 "--no-input"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 timeout=120,
             )
@@ -3673,7 +3675,7 @@ def main():
             if result.returncode == 0:
                 print("✅ 更新完成，请运行 token-stats --version 确认版本")
             else:
-                print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: clawhub update agent-usage-stats")
+                print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: cd ~ && clawhub update agent-usage-stats")
         except FileNotFoundError:
             print("❌ 未找到 clawhub CLI，请先安装: npm install -g clawhub")
             print("   然后手动执行: clawhub update agent-usage-stats")
@@ -3681,7 +3683,7 @@ def main():
             print("⚠️ 更新超时，请检查网络后手动执行: clawhub update agent-usage-stats")
         except Exception as e:
             print(f"⚠️ 更新失败: {e}")
-            print("   请手动执行: clawhub update agent-usage-stats")
+            print("   请手动执行: cd ~ && clawhub update agent-usage-stats")
         return
 
     # ── list-backends ──
