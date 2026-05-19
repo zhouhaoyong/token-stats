@@ -290,6 +290,31 @@ Output:
 - Context > 60% → suggests `/compact`; > 90% → warning
 - `Ctrl+C` to stop and see a monitoring summary
 
+Output (with activity):
+```
+📡 实时监控 [Claude Code] — refresh every 5s
+
+Initial state:
+  deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/8.36M | Calls 349
+  deepseek-v4-pro   | In 4.9M  | Out 1.19M  | Cache 451.87M | Total/+Cache 6.09M/451.87M | Calls 2348
+
+── [10:30:00] +1.2K tokens +3 calls ──
+  deepseek-v4-pro | +1K in/4.9M | +200 out/1.19M | +1.2K cache/451.87M | +3 calls
+  ╌╌╌╌╌ 📅 Today ╌╌╌╌╌
+  deepseek-v4-pro | In 3.02M | Out 323.29K | Cache 119.45M | Total/+Cache 3.34M/119.45M | Calls 624
+
+── [10:30:05] no new activity ──
+```
+
+After Ctrl+C stop:
+```
+  📊 Monitoring Summary
+  Final state:
+  deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/8.36M | Calls 349
+  deepseek-v4-pro   | In 4.91M | Out 1.19M | Cache 452.69M | Total/+Cache 6.1M/452.69M | Calls 2351
+  Subtotal           | In 6.93M | Out 1.27M | Cache 461.05M | Total/+Cache 8.2M/461.05M | Calls 2700
+```
+
 ### Compare
 
 Side-by-side comparison of two time periods — all 6 metrics per model:
