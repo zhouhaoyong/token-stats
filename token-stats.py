@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.4.3"
+VERSION = "2.4.4"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -746,6 +746,7 @@ def _build_aligned_raw(agent_display: str, per_model_list: list,
                         has_context: bool = False,
                         extra_footer: str = None) -> str:
     """从 per_model 数据构建列对齐的原始输出（含 Agent 合计行）。"""
+    per_model_list = [pm for pm in (per_model_list or []) if not _skip_model(pm)]
     if not per_model_list:
         return f"📊 {agent_display}"
 
