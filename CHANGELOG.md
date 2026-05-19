@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.4.3 (2026-05-20)
+
+### 修复
+- **Claude Code 缓存导致 watch 模式失效**：缓存仅在带时间筛选时启用，无参 collect 始终重读磁盘
+- **watch 刷新间隔不准**：循环改为先 collect 再 sleep，实际间隔从 ~10s 修正为 ~5s
+- **控制台输出列不对齐**：新增 `_build_aligned_raw` 统一列对齐，全部 Agent 输出一致
+- **缺少 Agent 合计行**：多模型时自动追加合计行（入/出/缓/总计/调用）
+- **`--all` / 多 Agent 缺少 Grand Total**：末尾显示全部 Agent 总计
+
+### 变更
+- **`-y` → `--year`**：短参数从 `--yesterday` 改为 `--year`，`--yesterday` 仅保留长参数
+- **导出格式顺序**：`[1] XLSX` / `[2] CSV` / `[3] JSON`
+- **导出格式统一**：单/多 Agent 导出均含 Agent 名称列 + 合并单元格 + 单独合计 + 总合计
+- `-e /path` 直接使用目录，跳过交互式提示
+- watch 分割线加长到 60 列
+
+### 新增
+- **CSV 导出**：简单/年度 × 单/多 Agent 全覆盖
+- **`token-stats update`**：自更新指令，调用 `clawhub update agent-usage-stats`
+
+## v2.4.2 (2026-05-20)
+
+### 修复
+- ClaudeCodeAgent 重复 collect() 不再重读磁盘（消息缓存）
+- 移除导出函数冗余的 today_calls 全量收集
+
+### 新增
+- CSV 导出格式，菜单顺序 XLSX/CSV/JSON
+
 ## v2.4.1 (2026-05-19)
 
 ### 变更
