@@ -5,20 +5,22 @@ token-stats — 选个 Agent 看它的 token 消耗
 用法:
   token-stats                    交互式菜单：选 Agent → 看统计
   token-stats -a hermes          直接查看 Hermes
-  token-stats --watch            交互式菜单 → 实时监控
+  token-stats -w / --watch            交互式菜单 → 实时监控
   token-stats --all              查看本机所有 Agent 的统计
   token-stats -a hermes --now    同默认（显式快照）
 
   时间段查询:
-  token-stats -a hermes --today
-  token-stats -a hermes --yesterday
+  token-stats -a hermes -t / --today
+  token-stats -a hermes -y / --yesterday
   token-stats -a hermes --week
   token-stats -a hermes --last-7d
+  token-stats -a hermes -m / --month
+  token-stats -a hermes --year
   token-stats -a hermes --from 2025-01-01 --to 2025-01-31
 
   导出:
-  token-stats -a hermes --export
-  token-stats -a hermes --today --export
+  token-stats -a hermes -e / --export
+  token-stats -a hermes -t -e
 
   对比:
   token-stats -a hermes --compare --a today --b yesterday
@@ -38,7 +40,6 @@ token-stats — 选个 Agent 看它的 token 消耗
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import re
@@ -52,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.3.8"
+VERSION = "2.4.0"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -207,7 +208,7 @@ def _hermes_collect_via_wsl(db_path, from_ts=None, to_ts=None):
         )
         return json.loads(r.stdout.decode("utf-8", errors="ignore"))
     except Exception:
-        return None, 0
+        return None
 
 
 # ── 路径配置系统 ──
@@ -333,37 +334,43 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
 
     lines = []
     if len(models) == 1:
-        # Single model: compact format with 📅 今日 prefix
         m, i, o, c, ca = models[0]
         t = i + o
-        parts = [f"输入 {fmt_num_fn(i)} tokens", f"输出 {fmt_num_fn(o)} tokens",
-                 f"总计 {fmt_num_fn(t)} tokens"]
-        if c:
-            parts.append(f"缓存 {fmt_num_fn(c)} tokens")
-        parts.append(f"调用 {ca} 次")
+        parts = [f"输入 {fmt_num_fn(i)}",
+                 f"输出 {fmt_num_fn(o)}",
+                 f"总计/+缓存 {fmt_num_fn(t)}/{fmt_num_fn(c)}",
+                 f"调用 {ca} 次"]
         lines.append(f"  📅 今日 | {' | '.join(parts)}")
     else:
-        # Multi model: header + per-model + separator + 合计
-        name_w = max((len(m) for m,_,_,_,_ in models), default=4)
-        name_w = max(name_w, 4)
-        lines.append("  📅 今日")
+        rows = []
         for m, i, o, c, ca in models:
             t = i + o
-            parts = [f"输入 {fmt_num_fn(i)} tokens", f"输出 {fmt_num_fn(o)} tokens",
-                     f"总计 {fmt_num_fn(t)} tokens"]
-            if c:
-                parts.append(f"缓存 {fmt_num_fn(c)} tokens")
-            parts.append(f"调用 {ca} 次")
-            lines.append(f"    {m:<{name_w}} | {' | '.join(parts)}")
-        sep_len = len(lines[1]) - 4  # minus indent
-        lines.append(f"    {'─' * sep_len}")
+            cols = [
+                f"输入 {fmt_num_fn(i)}",
+                f"输出 {fmt_num_fn(o)}",
+                f"总计/+缓存 {fmt_num_fn(t)}/{fmt_num_fn(c)}",
+                f"调用 {ca} 次",
+            ]
+            rows.append((m, cols))
         tt = ti + to
-        parts2 = [f"输入 {fmt_num_fn(ti)} tokens", f"输出 {fmt_num_fn(to)} tokens",
-                  f"总计 {fmt_num_fn(tt)} tokens"]
-        if tc:
-            parts2.append(f"缓存 {fmt_num_fn(tc)} tokens")
-        parts2.append(f"调用 {tca} 次")
-        lines.append(f"    {'合计':<{name_w}} | {' | '.join(parts2)}")
+        cols_total = [
+            f"输入 {fmt_num_fn(ti)}",
+            f"输出 {fmt_num_fn(to)}",
+            f"总计/+缓存 {fmt_num_fn(tt)}/{fmt_num_fn(tc)}",
+            f"调用 {tca} 次",
+        ]
+        rows.append(("今日合计", cols_total))
+        col_count = len(cols_total)
+        col_widths = [0] * (col_count + 1)
+        col_widths[0] = max(_display_width(r[0]) for r in rows)
+        for ci in range(col_count):
+            col_widths[ci + 1] = max(_display_width(r[1][ci]) for r in rows)
+        lines.append("  📅 今日")
+        for label, cols in rows:
+            parts = [_pad_to(label, col_widths[0])]
+            for ci, col_text in enumerate(cols):
+                parts.append(_pad_to(col_text, col_widths[ci + 1], ">"))
+            lines.append(f"    {' | '.join(parts)}")
     return lines
 MODEL_CONTEXT_MAP = {
     # ── Anthropic / Claude (all 200K) ──
@@ -523,6 +530,25 @@ def parse_time_label(label: str) -> tuple:
         start = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
         return start.timestamp(), now.timestamp()
 
+    if s in ("this-month", "month"):
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start.timestamp(), now.timestamp()
+
+    if s == "last-month":
+        first_of_this = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_of_last = first_of_this - timedelta(seconds=1)
+        start_of_last = end_of_last.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start_of_last.timestamp(), end_of_last.timestamp()
+
+    if s in ("this-year", "year"):
+        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start.timestamp(), now.timestamp()
+
+    if s == "last-year":
+        start = now.replace(year=now.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = now.replace(year=now.year - 1, month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
+        return start.timestamp(), end.timestamp()
+
     # Date range: YYYY-MM-DD~YYYY-MM-DD
     if "~" in s:
         parts = s.split("~", 1)
@@ -532,6 +558,26 @@ def parse_time_label(label: str) -> tuple:
 
     # Single date
     return parse_date(s)
+
+
+def _split_months(from_ts, to_ts):
+    """Split a time range into calendar month buckets.
+    Returns [(label, start_ts, end_ts), ...]"""
+    from_dt = datetime.fromtimestamp(from_ts)
+    to_dt = datetime.fromtimestamp(to_ts)
+    months = []
+    current = from_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while current <= to_dt:
+        month_start = current
+        if current.month == 12:
+            next_month = current.replace(year=current.year + 1, month=1)
+        else:
+            next_month = current.replace(month=current.month + 1)
+        month_end = min(next_month - timedelta(seconds=1), to_dt)
+        label = month_start.strftime('%Y-%m')
+        months.append((label, month_start.timestamp(), month_end.timestamp()))
+        current = next_month
+    return months
 
 
 def _progress_bar(pct: float) -> str:
@@ -634,6 +680,17 @@ def label_to_display(label: str) -> str:
     if s == "last-7d":
         start = now - timedelta(days=7)
         return f"{start.strftime('%Y-%m-%d')}~{now.strftime('%Y-%m-%d')}"
+    if s in ("this-month", "month"):
+        start = now.replace(day=1)
+        return f"{start.strftime('%Y-%m-%d')}~{now.strftime('%Y-%m-%d')}"
+    if s == "last-month":
+        first_of_this = now.replace(day=1)
+        end_of_last = first_of_this - timedelta(days=1)
+        return f"{end_of_last.replace(day=1).strftime('%Y-%m-%d')}~{end_of_last.strftime('%Y-%m-%d')}"
+    if s in ("this-year", "year"):
+        return f"{now.replace(month=1, day=1).strftime('%Y-%m-%d')}~{now.strftime('%Y-%m-%d')}"
+    if s == "last-year":
+        return f"{now.year - 1}-01-01~{now.year - 1}-12-31"
     # 已经是日期或日期段格式，直接返回
     return label
 
@@ -664,12 +721,12 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
         pct = round(total / context_window * 100, 1) if context_window else 0
         parts.append(f"上下文 {fmt_num(total)}/{fmt_num(context_window)} ({fmt_pct(pct)})")
     if inp > 0 or out > 0 or total > 0:
-        if not context_window:
-            parts.append(f"总计 {fmt_num(total)}")
+        if context_window:
+            parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
+        else:
+            parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(cache)}")
         parts.append(f"输入 {fmt_num(inp)}")
         parts.append(f"输出 {fmt_num(out)}")
-    if cache > 0:
-        parts.append(f"缓存 {fmt_num(cache)}")
     if calls > 0 and session_count != calls:
         parts.append(f"调用 {calls} 次")
     if session_count:
@@ -781,11 +838,9 @@ class BaseAgent(ABC):
                     cols.append(_progress_bar(pct))
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                 else:
-                    cols.append(f"总计 {fmt_num(total)}")
+                    cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(mv.get('cache', 0))}")
                 cols.append(f"入 {fmt_num(mv['input'])}")
                 cols.append(f"出 {fmt_num(mv['output'])}")
-                if has_cache:
-                    cols.append(f"存 {fmt_num(mv.get('cache', 0))}")
                 cols.append(f"调用 {mv['calls']}")
                 init_rows.append(cols)
                 has_data = True
@@ -935,27 +990,18 @@ class BaseAgent(ABC):
                             continue
                         ti += i; to += o; tc += c; tca += ca
                         t = i + o
-                        cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
-                        if c:
-                            today_has_cache = True
-                        cols.append(f"存 {fmt_num(c)}")
-                        cols.append(f"调用 {ca}")
+                        cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                                f"总计/+缓存 {fmt_num(t)}/{fmt_num(c)}", f"调用 {ca}"]
                         today_rows.append(cols)
                     if today_rows:
-                        if not today_has_cache:
-                            # 去掉缓存列
-                            for row in today_rows:
-                                row.pop(-2)  # 移除缓存
+                        if len(today_models) > 1:
+                            t = ti + to
+                            sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
+                                       f"总计/+缓存 {fmt_num(t)}/{fmt_num(tc)}", f"调用 {tca}"]
+                            today_rows.append(sum_row)
                         aligned = _align_rows(today_rows)
                         for row in aligned:
                             print(f"  {' | '.join(row)}")
-                    if len(today_models) > 1:
-                        t = ti + to
-                        sum_parts = [f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}", f"总计 {fmt_num(t)}"]
-                        if tc:
-                            sum_parts.append(f"存 {fmt_num(tc)}")
-                        sum_parts.append(f"调用 {tca}")
-                        print(f"  今日合计 | {' | '.join(sum_parts)}")
                     print("  ╌" * 20)
                 except Exception:
                     pass
@@ -1004,7 +1050,6 @@ class BaseAgent(ABC):
                 ti = to = tc = tca = 0
                 today_models = today_data.per_model or []
                 today_rows = []
-                today_has_cache = False
                 for pm in today_models:
                     m = pm.get("model", "?")
                     i = pm.get("input", 0) or 0
@@ -1015,27 +1060,19 @@ class BaseAgent(ABC):
                         continue
                     ti += i; to += o; tc += c; tca += ca
                     t = i + o
-                    cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}", f"总计 {fmt_num(t)}"]
-                    if c:
-                        today_has_cache = True
-                    cols.append(f"存 {fmt_num(c)}")
-                    cols.append(f"调用 {ca}")
+                    cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                            f"总计/+缓存 {fmt_num(t)}/{fmt_num(c)}", f"调用 {ca}"]
                     today_rows.append(cols)
                 if today_rows:
                     print(f"\n  ╌╌╌╌╌ 📅 今日累计 ╌╌╌╌╌")
-                    if not today_has_cache:
-                        for row in today_rows:
-                            row.pop(-2)
+                    if len(today_models) > 1:
+                        t = ti + to
+                        sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
+                                   f"总计/+缓存 {fmt_num(t)}/{fmt_num(tc)}", f"调用 {tca}"]
+                        today_rows.append(sum_row)
                     aligned = _align_rows(today_rows)
                     for row in aligned:
                         print(f"  {' | '.join(row)}")
-                    if len(today_models) > 1:
-                        t = ti + to
-                        sum_parts = [f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}", f"总计 {fmt_num(t)}"]
-                        if tc:
-                            sum_parts.append(f"存 {fmt_num(tc)}")
-                        sum_parts.append(f"调用 {tca}")
-                        print(f"  今日合计 | {' | '.join(sum_parts)}")
                     print("  ╌" * 20)
             except Exception:
                 pass
@@ -2045,11 +2082,352 @@ def show_menu(installed: list[type[BaseAgent]], *, allow_all: bool = True):
 
 
 # ═══════════════════════════════════════════════════
-#  导出
+#  导出 — 纯 stdlib XLSX 写入器 + 交互式导出函数
 # ═══════════════════════════════════════════════════
 
-def export_interactive(data: AgentData, agent: BaseAgent):
-    """交互式导出统计"""
+import zipfile
+import xml.etree.ElementTree as ET
+
+_METRIC_LABELS = {'input': '输入', 'output': '输出', 'cache': '缓存',
+                  'calls': '调用', 'total': '总计', 'total_with_cache': '总计(含缓存)'}
+_METRIC_ORDER = ['input', 'output', 'cache', 'calls', 'total', 'total_with_cache']
+
+_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+ET.register_namespace('', _NS)
+
+
+def _xml_tag(tag):
+    return f'{{{_NS}}}{tag}'
+
+
+class _XLSXWriter:
+    """纯 stdlib XLSX 写入器。"""
+
+    def __init__(self):
+        self.sheets = {}
+        self.col_widths = {}
+        self.merges = {}
+        self.freezes = {}
+        self._strings = []
+        self._str_idx = {}
+
+    def _add_str(self, s):
+        s = str(s)
+        if s not in self._str_idx:
+            self._str_idx[s] = len(self._strings)
+            self._strings.append(s)
+        return self._str_idx[s]
+
+    def add_sheet(self, name, col_widths=None, merges=None, freeze=None):
+        name = name[:31]
+        self.sheets[name] = []
+        if col_widths:
+            self.col_widths[name] = col_widths
+        if merges:
+            self.merges[name] = merges
+        if freeze:
+            self.freezes[name] = freeze
+
+    def add_row(self, sheet, values):
+        self.sheets[sheet].append(values)
+
+    def _col_letter(self, n):
+        s = ''
+        while n > 0:
+            n, r = divmod(n - 1, 26)
+            s = chr(65 + r) + s
+        return s
+
+    def _build_styles_xml(self):
+        fonts_el = ET.Element(_xml_tag('fonts'), count='3')
+        ET.SubElement(fonts_el, _xml_tag('font'))
+        fb = ET.SubElement(fonts_el, _xml_tag('font'))
+        ET.SubElement(fb, _xml_tag('b'))
+        ET.SubElement(fb, _xml_tag('color'), rgb='FFFFFFFF')
+        fb2 = ET.SubElement(fonts_el, _xml_tag('font'))
+        ET.SubElement(fb2, _xml_tag('b'))
+        fills_el = ET.Element(_xml_tag('fills'), count='5')
+        ET.SubElement(fills_el, _xml_tag('fill'))
+        ET.SubElement(ET.SubElement(fills_el, _xml_tag('fill')), _xml_tag('patternFill'), patternType='gray125')
+        fh = ET.SubElement(fills_el, _xml_tag('fill'))
+        ET.SubElement(fh, _xml_tag('patternFill'), patternType='solid').append(
+            ET.Element(_xml_tag('fgColor'), rgb='FF4472C4'))
+        ft = ET.SubElement(fills_el, _xml_tag('fill'))
+        ET.SubElement(ft, _xml_tag('patternFill'), patternType='solid').append(
+            ET.Element(_xml_tag('fgColor'), rgb='FFD9E2F3'))
+        fg = ET.SubElement(fills_el, _xml_tag('fill'))
+        ET.SubElement(fg, _xml_tag('patternFill'), patternType='solid').append(
+            ET.Element(_xml_tag('fgColor'), rgb='FFF2F2F2'))
+        borders_el = ET.Element(_xml_tag('borders'), count='1')
+        ET.SubElement(borders_el, _xml_tag('border'))
+        style_xml = ET.Element(_xml_tag('styleSheet'))
+        style_xml.append(fonts_el)
+        style_xml.append(fills_el)
+        style_xml.append(borders_el)
+        ET.SubElement(style_xml, _xml_tag('cellStyleXfs'), count='1').append(
+            ET.Element(_xml_tag('xf'), numFmtId='0', fontId='0', fillId='0', borderId='0'))
+        xfs = ET.SubElement(style_xml, _xml_tag('cellXfs'), count='5')
+        ET.SubElement(xfs, _xml_tag('xf'), numFmtId='0', fontId='0', fillId='0', borderId='0', xfId='0')
+        ET.SubElement(xfs, _xml_tag('xf'), numFmtId='0', fontId='1', fillId='2', borderId='0', xfId='0', applyFont='1', applyFill='1')
+        ET.SubElement(xfs, _xml_tag('xf'), numFmtId='0', fontId='2', fillId='3', borderId='0', xfId='0', applyFont='1', applyFill='1')
+        ET.SubElement(xfs, _xml_tag('xf'), numFmtId='0', fontId='2', fillId='0', borderId='0', xfId='0', applyFont='1')
+        ET.SubElement(xfs, _xml_tag('xf'), numFmtId='0', fontId='0', fillId='4', borderId='0', xfId='0', applyFill='1')
+        return ET.tostring(style_xml, encoding='utf-8', xml_declaration=True)
+
+    def _build_shared_strings_xml(self):
+        sst = ET.Element(_xml_tag('sst'), count=str(len(self._strings)),
+                         uniqueCount=str(len(self._strings)))
+        for s in self._strings:
+            si = ET.SubElement(sst, _xml_tag('si'))
+            ET.SubElement(si, _xml_tag('t')).text = s
+        return ET.tostring(sst, encoding='utf-8', xml_declaration=True)
+
+    def _build_sheet_xml(self, name):
+        ws = ET.Element(_xml_tag('worksheet'))
+        rows = self.sheets[name]
+        if name in self.col_widths:
+            cols_el = ET.SubElement(ws, _xml_tag('cols'))
+            for letter, width in sorted(self.col_widths[name].items()):
+                col_num = 0
+                for ch in letter:
+                    col_num = col_num * 26 + (ord(ch.upper()) - 64)
+                ET.SubElement(cols_el, _xml_tag('col'), min=str(col_num), max=str(col_num),
+                              width=str(width), customWidth='1')
+        sd = ET.SubElement(ws, _xml_tag('sheetData'))
+        for row_idx, row_data in enumerate(rows, 1):
+            row_el = ET.SubElement(sd, _xml_tag('row'), r=str(row_idx))
+            for col_idx, item in enumerate(row_data, 1):
+                val, style = item if isinstance(item, tuple) else (item, 0)
+                ref = f'{self._col_letter(col_idx)}{row_idx}'
+                if isinstance(val, str):
+                    idx = self._add_str(val)
+                    ET.SubElement(row_el, _xml_tag('c'), r=ref, t='s', s=str(style)).append(
+                        ET.Element(_xml_tag('v'), text=str(idx)))
+                elif isinstance(val, (int, float)):
+                    ET.SubElement(row_el, _xml_tag('c'), r=ref, s=str(style)).append(
+                        ET.Element(_xml_tag('v'), text=str(int(val))))
+        if name in self.merges:
+            mc_el = ET.SubElement(ws, _xml_tag('mergeCells'), count=str(len(self.merges[name])))
+            for r1, c1, r2, c2 in self.merges[name]:
+                ref = f'{self._col_letter(c1)}{r1}:{self._col_letter(c2)}{r2}'
+                ET.SubElement(mc_el, _xml_tag('mergeCell'), ref=ref)
+        if name in self.freezes:
+            fp = self.freezes[name]
+            sv = ET.SubElement(ws, _xml_tag('sheetViews'))
+            sv_el = ET.SubElement(sv, _xml_tag('sheetView'), tabSelected='1', workbookViewId='0')
+            pane_el = ET.SubElement(sv_el, _xml_tag('pane'))
+            cl = ''.join(c for c in fp if c.isalpha())
+            rn = int(''.join(c for c in fp if c.isdigit()))
+            pane_el.set('ySplit', str(rn - 1))
+            pane_el.set('topLeftCell', fp)
+            pane_el.set('activePane', 'bottomRight')
+            pane_el.set('state', 'frozen')
+        return ET.tostring(ws, encoding='utf-8', xml_declaration=True)
+
+    def save(self, filepath):
+        with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+            ct_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                      '<Default Extension="xml" ContentType="application/xml"/>'
+                      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>')
+            for name in list(self.sheets.keys()):
+                safe = name.replace(' ', '')
+                ct_xml += f'<Override PartName="/xl/worksheets/{safe}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            ct_xml += ('<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+                       '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+                       '</Types>')
+            zf.writestr('[Content_Types].xml', ct_xml)
+            zf.writestr('_rels/.rels',
+                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+                        '</Relationships>')
+            wb_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+                      ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>')
+            for i, name in enumerate(self.sheets.keys(), 1):
+                safe = name.replace(' ', '')
+                wb_xml += f'<sheet name="{name}" sheetId="{i}" r:id="rId{i}"/>'
+            wb_xml += '</sheets></workbook>'
+            zf.writestr('xl/workbook.xml', wb_xml)
+            rels_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">')
+            for i, name in enumerate(self.sheets.keys(), 1):
+                safe = name.replace(' ', '')
+                rels_xml += f'<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/{safe}.xml"/>'
+            rels_xml += ('<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                         '<Relationship Id="rIdStrings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+                         '</Relationships>')
+            zf.writestr('xl/_rels/workbook.xml.rels', rels_xml)
+            zf.writestr('xl/styles.xml', self._build_styles_xml())
+            zf.writestr('xl/sharedStrings.xml', self._build_shared_strings_xml())
+            for name in self.sheets.keys():
+                safe = name.replace(' ', '')
+                zf.writestr(f'xl/worksheets/{safe}.xml', self._build_sheet_xml(name))
+
+
+HDR_STYLE = 1  # 白字蓝底
+TOT_STYLE = 2  # 加粗蓝底
+
+
+def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models,
+                       today_calls_by_model, date_str):
+    wb = _XLSXWriter()
+    col_widths = {'A': 22}
+    for i in range(2, 9):
+        col_widths[wb._col_letter(i)] = 16
+    wb.add_sheet(agent_display, col_widths=col_widths)
+    headers = ['模型', '输入', '输出', '缓存', '调用', '今日调用', '总计', '总计(含缓存)']
+    wb.add_row(agent_display, [(h, HDR_STYLE) for h in headers])
+    for pm in filtered_models:
+        inp = int(pm.get('input', 0))
+        out = int(pm.get('output', 0))
+        cache = int(pm.get('cache', 0))
+        calls = int(pm.get('calls', 0))
+        model = pm.get('model', 'unknown')
+        tc = today_calls_by_model.get(model, 0)
+        wb.add_row(agent_display, [model, inp, out, cache, calls, tc, inp + out, inp + out + cache])
+    if len(filtered_models) > 1:
+        ti = int(sum(pm.get('input', 0) for pm in filtered_models))
+        to = int(sum(pm.get('output', 0) for pm in filtered_models))
+        tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
+        tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
+        ttoday = sum(today_calls_by_model.values())
+        wb.add_row(agent_display, [
+            ('合计', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
+            (tc, TOT_STYLE), (tca, TOT_STYLE), (ttoday, TOT_STYLE),
+            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+    wb.save(filepath)
+
+def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_months):
+    """单 Agent 年度 XLSX，按月拆分列。"""
+    wb = _XLSXWriter()
+    month_count = len(all_months)
+    all_models = sorted({m for d in monthly_data.values() for m in d})
+    col_widths = {'A': 22, 'B': 14}
+    for i in range(month_count):
+        col_widths[wb._col_letter(3 + i)] = 16
+    col_widths[wb._col_letter(3 + month_count)] = 16
+    merges = []
+    wb.add_sheet(agent_display, col_widths=col_widths, merges=merges, freeze='C2')
+    headers = ['Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
+    wb.add_row(agent_display, [(h, HDR_STYLE) for h in headers])
+    row_num = 2
+    for model in all_models:
+        ms = row_num
+        for metric in _METRIC_ORDER:
+            vals = [('' if metric != 'input' else model, 0), (_METRIC_LABELS[metric], 0)]
+            tot = 0
+            for m_label in all_months:
+                md = monthly_data[m_label].get(model, {})
+                if metric == 'total':
+                    v = md.get('input', 0) + md.get('output', 0)
+                elif metric == 'total_with_cache':
+                    v = md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                else:
+                    v = md.get(metric, 0)
+                tot += v
+                vals.append((int(v), 0))
+            vals.append((int(tot), 0))
+            wb.add_row(agent_display, vals)
+            row_num += 1
+        merges.append((ms, 1, row_num - 1, 1))
+    gt = row_num
+    for metric in _METRIC_ORDER:
+        vals = [('' if metric != 'input' else '合计', TOT_STYLE), (_METRIC_LABELS[metric], TOT_STYLE)]
+        gt_all = 0
+        for m_label in all_months:
+            ct = 0
+            for model in all_models:
+                md = monthly_data[m_label].get(model, {})
+                if metric == 'total':
+                    ct += md.get('input', 0) + md.get('output', 0)
+                elif metric == 'total_with_cache':
+                    ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                else:
+                    ct += md.get(metric, 0)
+            gt_all += ct
+            vals.append((int(ct), TOT_STYLE))
+        vals.append((int(gt_all), TOT_STYLE))
+        wb.add_row(agent_display, vals)
+        row_num += 1
+    merges.append((gt, 1, row_num - 1, 1))
+    wb.merges[agent_display] = merges
+    wb.save(filepath)
+
+
+def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order):
+    """多 Agent 年度 XLSX，全部 Agent 在一个 Sheet。"""
+    wb = _XLSXWriter()
+    month_count = len(all_months)
+    col_widths = {'A': 18, 'B': 22, 'C': 14}
+    for i in range(month_count):
+        col_widths[wb._col_letter(4 + i)] = 16
+    col_widths[wb._col_letter(4 + month_count)] = 16
+    merges = []
+    wb.add_sheet('年度统计', col_widths=col_widths, merges=merges, freeze='D2')
+    headers = ['Agent', 'Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
+    wb.add_row('年度统计', [(h, HDR_STYLE) for h in headers])
+    all_rows = []
+    for agent_name, agent_display, monthly_data in agent_order:
+        all_models = sorted({m for d in monthly_data.values() for m in d})
+        for model in all_models:
+            all_rows.append((agent_name, agent_display, model, monthly_data))
+    row_num = 2
+    for agent_name, agent_display, model, monthly_data in all_rows:
+        ms = row_num
+        for metric in _METRIC_ORDER:
+            vals = [
+                ('' if metric != 'input' else agent_display, 0),
+                ('' if metric != 'input' else model, 0),
+                (_METRIC_LABELS[metric], 0)]
+            tot = 0
+            for m_label in all_months:
+                md = monthly_data[m_label].get(model, {})
+                if metric == 'total':
+                    v = md.get('input', 0) + md.get('output', 0)
+                elif metric == 'total_with_cache':
+                    v = md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                else:
+                    v = md.get(metric, 0)
+                tot += v
+                vals.append((int(v), 0))
+            vals.append((int(tot), 0))
+            wb.add_row('年度统计', vals)
+            row_num += 1
+        merges.append((ms, 1, row_num - 1, 1))
+        merges.append((ms, 2, row_num - 1, 2))
+    gt = row_num
+    for metric in _METRIC_ORDER:
+        vals = [('' if metric != 'input' else '全部总计', TOT_STYLE), ('', TOT_STYLE),
+                (_METRIC_LABELS[metric], TOT_STYLE)]
+        gt_all = 0
+        for m_label in all_months:
+            ct = 0
+            for _, _, model, monthly_data in all_rows:
+                md = monthly_data[m_label].get(model, {})
+                if metric == 'total':
+                    ct += md.get('input', 0) + md.get('output', 0)
+                elif metric == 'total_with_cache':
+                    ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                else:
+                    ct += md.get(metric, 0)
+            gt_all += ct
+            vals.append((int(ct), TOT_STYLE))
+        vals.append((int(gt_all), TOT_STYLE))
+        wb.add_row('年度统计', vals)
+        row_num += 1
+    merges.append((gt, 1, row_num - 1, 1))
+    merges.append((gt, 2, row_num - 1, 2))
+    wb.merges['年度统计'] = merges
+    wb.save(filepath)
+
+
+def export_interactive(data: AgentData, agent: BaseAgent,
+                       from_ts: float = None, to_ts: float = None,
+                       is_year: bool = False):
+    """交互式导出统计。is_year=True 时按月拆分，导出 XLSX/JSON。"""
     try:
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
@@ -2091,15 +2469,12 @@ def export_interactive(data: AgentData, agent: BaseAgent):
                 cw = detect_context(m)
                 pct = round(total_tok / cw * 100, 1) if cw else 0
                 print(f"    上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
-            else:
-                print(f"    总计 tokens     {fmt_num(total_tok):>8}")
             print(f"    输入 tokens     {fmt_num(inp):>8}")
             print(f"    输出 tokens     {fmt_num(out):>8}")
             print(f"    缓存 tokens     {fmt_num(cache):>8}")
             print(f"    调用次数        {calls} 次 (今日: {today_calls_by_model.get(m, 0)} 次)")
             print(f"    ─────────────────────────────────────")
-            print(f"    总计 tokens     {fmt_num(total_tok):>8}")
-            print(f"    总计 + 缓存     {fmt_num(total_w_cache):>8}")
+            print(f"    总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
 
         # ── 合计（多模型时显示） ──
         if filtered_models and len(filtered_models) > 1:
@@ -2115,39 +2490,46 @@ def export_interactive(data: AgentData, agent: BaseAgent):
             print(f"    缓存 tokens     {fmt_num(tc):>8}")
             print(f"    调用次数        {tca} 次")
             print(f"    ─────────────────────────────────────")
-            print(f"    总计 tokens     {fmt_num(tt):>8}")
-            print(f"    总计 + 缓存     {fmt_num(tt + tc):>8}")
+            print(f"    总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
         print()
 
         # Step 1: 输入目录
-        while True:
-            dir_input = input("\n请输入导出目录路径: ").strip()
-            if not dir_input or dir_input.lower() == "q":
-                print("已取消导出")
-                return
-            dir_path = os.path.expanduser(dir_input)
-            if os.path.isdir(dir_path):
-                break
-            print(f"⚠️ 目录不存在: {dir_path}")
-            print("请确保目录存在，或输入 q 取消")
+        dir_path = os.getcwd()
+        try:
+            while True:
+                dir_input = input("\n请输入导出目录路径 (回车=当前目录, q=取消): ").strip()
+                if not dir_input:
+                    break
+                if dir_input.lower() == "q":
+                    print("已取消导出")
+                    return
+                p = os.path.expanduser(dir_input)
+                if os.path.isdir(p):
+                    dir_path = p
+                    break
+                print(f"⚠️ 目录不存在: {p}, 请重试")
+        except EOFError:
+            pass
 
         # Step 2: 选择格式
         print("\n选择导出格式:")
-        print("  [1] JSON")
-        print("  [2] CSV")
-        fmt_choice = input("请选择 (1/2): ").strip().lower()
-
-        if fmt_choice in ("1", "json"):
-            fmt = "json"
-        elif fmt_choice in ("2", "csv"):
-            fmt = "csv"
-        else:
-            print(f"⚠️ 不支持格式 '{fmt_choice}'，默认使用 JSON")
-            fmt = "json"
+        print("  [1] XLSX（默认）")
+        print("  [2] JSON")
+        fmt = "xlsx"
+        try:
+            fmt_choice = input("请选择 (1/2, 回车=1): ").strip().lower()
+            if fmt_choice in ("2", "json"):
+                fmt = "json"
+        except EOFError:
+            pass
 
         # Step 3: 写文件
         timestamp = now.strftime("%Y%m%d_%H%M%S")
-        filename = f"token-stats_{agent.name()}_{timestamp}.{fmt}"
+        if is_year:
+            prefix = f"token-stats_{agent.name()}_yearly"
+        else:
+            prefix = f"token-stats_{agent.name()}"
+        filename = f"{prefix}_{timestamp}.{fmt}"
         filepath = os.path.join(dir_path, filename)
 
         if fmt == "json":
@@ -2185,28 +2567,27 @@ def export_interactive(data: AgentData, agent: BaseAgent):
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
         else:
-            with open(filepath, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["模型", "输入tokens", "输出tokens", "缓存tokens",
-                                 "调用次数", "今日总调用", "总计tokens", "总计+缓存"])
-                for pm in filtered_models:
-                    inp = pm.get("input", 0)
-                    out = pm.get("output", 0)
-                    cache = pm.get("cache", 0)
-                    writer.writerow([
-                        pm.get("model", "unknown"),
-                        inp, out, cache,
-                        pm.get("calls", 0), today_calls_by_model.get(pm.get("model", ""), 0),
-                        inp + out, inp + out + cache,
-                    ])
-
-                if filtered_models and len(filtered_models) > 1:
-                    ti = sum(pm.get("input", 0) for pm in filtered_models)
-                    to = sum(pm.get("output", 0) for pm in filtered_models)
-                    tc = sum(pm.get("cache", 0) for pm in filtered_models)
-                    tca = sum(pm.get("calls", 0) for pm in filtered_models)
-                    writer.writerow(["合计", ti, to, tc, tca, today_calls,
-                                    ti + to, ti + to + tc])
+            if is_year and from_ts is not None and to_ts is not None:
+                months = _split_months(from_ts, to_ts)
+                month_labels = [label for label, _, _ in months]
+                monthly_data = {}
+                total_months = len(months)
+                for idx, (label, m_start, m_end) in enumerate(months, 1):
+                    print(f"  ⏳ 正在收集 {label} 数据 ({idx}/{total_months})...", end="\r", flush=True)
+                    m_data = agent.collect(from_ts=m_start, to_ts=m_end)
+                    monthly_data[label] = {
+                        pm.get("model", "unknown"): {
+                            "input": pm.get("input", 0), "output": pm.get("output", 0),
+                            "cache": pm.get("cache", 0), "calls": pm.get("calls", 0),
+                        }
+                        for pm in (m_data.per_model or []) if not _skip_model(pm)
+                    }
+                print(" " * 40, end="\r")  # clear
+                _write_xlsx_monthly(filepath, agent.name(), agent.display_name(),
+                                    monthly_data, month_labels)
+            else:
+                _write_xlsx_simple(filepath, agent.name(), agent.display_name(),
+                                   filtered_models, today_calls_by_model, date_str)
 
         print(f"✅ 已导出到: {filepath}")
     except KeyboardInterrupt:
@@ -2214,8 +2595,9 @@ def export_interactive(data: AgentData, agent: BaseAgent):
         print("已取消导出")
 
 
-def export_multi(results: list[tuple[BaseAgent, AgentData]]):
-    """导出多个 Agent 的统计（合并输出）"""
+def export_multi(results: list[tuple[BaseAgent, AgentData]],
+                  is_year: bool = False, from_ts: float = None, to_ts: float = None):
+    """导出多个 Agent 的统计（合并输出）。is_year=True 时按月拆分。"""
     try:
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
@@ -2267,8 +2649,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 print(f"      缓存 tokens     {fmt_num(cache):>8}")
                 print(f"      调用次数        {calls} 次 (今日: {today_calls_by_model.get(m, 0)} 次)")
                 print(f"      ─────────────────────────────────────")
-                print(f"      总计 tokens     {fmt_num(total_tok):>8}")
-                print(f"      总计 + 缓存     {fmt_num(total_w_cache):>8}")
+                print(f"      总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
 
             # Agent 内合计
             if agent_models and len(agent_models) > 1:
@@ -2284,8 +2665,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 print(f"      缓存 tokens     {fmt_num(tc):>8}")
                 print(f"      调用次数        {tca} 次")
                 print(f"      ─────────────────────────────────────")
-                print(f"      总计 tokens     {fmt_num(tt):>8}")
-                print(f"      总计 + 缓存     {fmt_num(tt + tc):>8}")
+                print(f"      总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
                 grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca; grand_today += today_calls
             else:
                 pm = agent_models[0] if agent_models else {}
@@ -2305,39 +2685,45 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
             print(f"    缓存 tokens     {fmt_num(grand_tc):>8}")
             print(f"    调用次数        {grand_tca} 次 (今日: {grand_today} 次)")
             print(f"    ─────────────────────────────────────")
-            print(f"    总计 tokens     {fmt_num(gtt):>8}")
-            print(f"    总计 + 缓存     {fmt_num(gtt + grand_tc):>8}")
+            print(f"    总计/+缓存     {fmt_num(gtt)}/{fmt_num(gtt + grand_tc)}")
 
         # Step 1: 输入目录
-        while True:
-            dir_input = input("\n请输入导出目录路径: ").strip()
-            if not dir_input or dir_input.lower() == "q":
-                print("已取消导出")
-                return
-            dir_path = os.path.expanduser(dir_input)
-            if os.path.isdir(dir_path):
-                break
-            print(f"  {dir_path}")
-            print("请确保目录存在，或输入 q 取消")
+        dir_path = os.getcwd()
+        try:
+            while True:
+                dir_input = input("\n请输入导出目录路径 (回车=当前目录, q=取消): ").strip()
+                if not dir_input:
+                    break
+                if dir_input.lower() == "q":
+                    print("已取消导出")
+                    return
+                p = os.path.expanduser(dir_input)
+                if os.path.isdir(p):
+                    dir_path = p
+                    break
+                print(f"⚠️ 目录不存在: {p}, 请重试")
+        except EOFError:
+            pass
 
         # Step 2: 选择格式
-        print("\n选择导出格式:")
-        print("  [1] JSON")
-        print("  [2] CSV")
-        fmt_choice = input("请选择 (1/2): ").strip().lower()
-
-        if fmt_choice in ("1", "json"):
-            fmt = "json"
-        elif fmt_choice in ("2", "csv"):
-            fmt = "csv"
-        else:
-            print(f"  '{fmt_choice}'，默认使用 JSON")
-            fmt = "json"
+        fmt = "xlsx"
+        try:
+            print("\n选择导出格式:")
+            print("  [1] XLSX（默认）")
+            print("  [2] JSON")
+            fmt_choice = input("请选择 (1/2, 回车=1): ").strip().lower()
+            if fmt_choice in ("2", "json"):
+                fmt = "json"
+        except EOFError:
+            pass
 
         # Step 3: 写文件
         timestamp = now.strftime("%Y%m%d_%H%M%S")
         agent_names = "+".join(agent.name() for agent, _, _, _ in agent_data_list)
-        filename = f"token-stats_{agent_names}_{timestamp}.{fmt}"
+        if is_year:
+            filename = f"token-stats_{agent_names}_yearly_{timestamp}.{fmt}"
+        else:
+            filename = f"token-stats_{agent_names}_{timestamp}.{fmt}"
         filepath = os.path.join(dir_path, filename)
 
         if fmt == "json":
@@ -2390,36 +2776,42 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]]):
                 }
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
+            print(f"  {filepath}")
+            print(f"多 Agent 数据已合并导出")
         else:
-            with open(filepath, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Agent", "模型", "输入tokens", "输出tokens", "缓存tokens",
-                                "调用次数", "今日总调用", "总计tokens", "总计+缓存"])
+            if is_year and from_ts is not None and to_ts is not None:
+                months = _split_months(from_ts, to_ts)
+                month_labels = [label for label, _, _ in months]
+                agent_order = []
+                for agent, data, today_calls, today_calls_by_model, agent_models in filtered_list:
+                    monthly_data = {}
+                    total_months = len(months)
+                    for idx, (label, m_start, m_end) in enumerate(months, 1):
+                        print(f"  ⏳ 正在收集 {agent.display_name()} {label} 数据 ({idx}/{total_months})...", end="\r", flush=True)
+                        m_data = agent.collect(from_ts=m_start, to_ts=m_end)
+                        monthly_data[label] = {
+                            pm.get("model", "unknown"): {
+                                "input": pm.get("input", 0), "output": pm.get("output", 0),
+                                "cache": pm.get("cache", 0), "calls": pm.get("calls", 0),
+                            }
+                            for pm in (m_data.per_model or []) if not _skip_model(pm)
+                        }
+                    print(" " * 50, end="\r")
+                    agent_order.append((agent.name(), agent.display_name(), monthly_data))
+                _write_xlsx_multi_monthly(filepath, agent_order, month_labels, agent_order)
+                print(f"  {filepath}")
+                print(f"多 Agent 数据已合并导出")
+            else:
                 for agent, data, today_calls, today_calls_by_model in agent_data_list:
                     agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
-                    for pm in agent_models:
-                        inp = pm.get("input", 0)
-                        out = pm.get("output", 0)
-                        cache = pm.get("cache", 0)
-                        writer.writerow([
-                            agent.name(), pm.get("model", "unknown"),
-                            inp, out, cache,
-                            pm.get("calls", 0), today_calls_by_model.get(pm.get("model", ""), 0),
-                            inp + out, inp + out + cache,
-                        ])
-                    if agent_models and len(agent_models) > 1:
-                        ti = sum(pm.get("input", 0) for pm in agent_models)
-                        to = sum(pm.get("output", 0) for pm in agent_models)
-                        tc = sum(pm.get("cache", 0) for pm in agent_models)
-                        tca = sum(pm.get("calls", 0) for pm in agent_models)
-                        writer.writerow([agent.name(), "合计", ti, to, tc, tca, today_calls,
-                                       ti + to, ti + to + tc])
-                if len(agent_data_list) > 1:
-                    writer.writerow(["全部", "总计", grand_ti, grand_to, grand_tc, grand_tca,
-                                   grand_today, grand_ti + grand_to, grand_ti + grand_to + grand_tc])
-
-        print(f"  {filepath}")
-        print(f"多 Agent 数据已合并导出")
+                    if not agent_models:
+                        continue
+                    a_filename = f"token-stats_{agent.name()}_{timestamp}.xlsx"
+                    a_filepath = os.path.join(dir_path, a_filename)
+                    _write_xlsx_simple(a_filepath, agent.name(), agent.display_name(),
+                                       agent_models, today_calls_by_model, date_str)
+                    print(f"  {a_filepath}")
+                print(f"多 Agent 数据已分别导出")
     except KeyboardInterrupt:
         print()
         print("已取消导出")
@@ -2434,11 +2826,13 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
     a_start, a_end = parse_time_label(a_label)
     b_start, b_end = parse_time_label(b_label)
 
+    print("  ⏳ 正在收集对比数据...", end="\r", flush=True)
     data_a = agent.collect(from_ts=a_start, to_ts=a_end)
     data_b = agent.collect(from_ts=b_start, to_ts=b_end)
+    print(" " * 30, end="\r")
 
-    models_a = {pm["model"]: pm for pm in (data_a.per_model or [])}
-    models_b = {pm["model"]: pm for pm in (data_b.per_model or [])}
+    models_a = {pm["model"]: pm for pm in (data_a.per_model or []) if not _skip_model(pm)}
+    models_b = {pm["model"]: pm for pm in (data_b.per_model or []) if not _skip_model(pm)}
     all_models = sorted(set(list(models_a.keys()) + list(models_b.keys())))
 
     if not all_models:
@@ -2528,7 +2922,9 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
         if detected:
             try:
                 agent = cls()
+                print(f"  ⏳ 正在收集 {cls.display_name()} 数据...", end="\r", flush=True)
                 data = agent.collect(from_ts=from_ts, to_ts=to_ts)
+                print(" " * 40, end="\r")
                 if data.stats:
                     any_data = True
                 print(data.raw)
@@ -2651,15 +3047,17 @@ def main():
   基础:
     token-stats                       交互式菜单选择 Agent → 查看统计
     token-stats -a <name>             直接指定 Agent: hermes/claude-code/codex/openclaw
-    token-stats --version             显示版本号
+    token-stats -v / --version        显示版本号
     token-stats -a <name> --detail    详细模式（同默认）
     token-stats -a <name> --now       当前快照（同默认）
 
   快速时间段:
-    token-stats -a <name> --today     今日统计
-    token-stats -a <name> --yesterday 昨日统计
-    token-stats -a <name> --week      本周统计（周一起）
-    token-stats -a <name> --last-7d   最近 7 天
+    token-stats -a <name> -t / --today     今日统计
+    token-stats -a <name> -y / --yesterday 昨日统计
+    token-stats -a <name> --week           本周统计（周一起）
+    token-stats -a <name> --last-7d        最近 7 天
+    token-stats -a <name> -m / --month     本月统计
+    token-stats -a <name> --year           本年统计
     token-stats -a <name> --from 2025-01-01 --to 2025-01-31  自定义时间段
 
   对比:
@@ -2667,15 +3065,15 @@ def main():
         快捷标签对比
     token-stats -a <name> --compare --a 2025-01-01~2025-01-07 --b 2025-01-08~2025-01-14
         自定义时间段对比
-    标签支持: today / yesterday / this-week / last-week / YYYY-MM-DD / YYYY-MM-DD~YYYY-MM-DD
+    标签支持: today / yesterday / this-week / last-week / this-month / last-month / this-year / last-year / YYYY-MM-DD / YYYY-MM-DD~YYYY-MM-DD
 
   导出:
-    token-stats -a <name> --export    导出当前统计（交互式选目录和格式）
-    token-stats -a <name> --today --export  导出今日统计
+    token-stats -a <name> -e / --export    导出当前统计（交互式选目录和格式）
+    token-stats -a <name> -t -e            导出今日统计
 
   实时监控:
-    token-stats -a <name> --watch     实时监控，每 5 秒刷新 (Ctrl+C 停止)
-    token-stats -a <name> --watch 10  自定义间隔秒数
+    token-stats -a <name> -w / --watch     实时监控，默认 5 秒刷新 (Ctrl+C 停止)
+    token-stats -a <name> -w 10            自定义间隔秒数
     停止后自动展示监控时间段内的完整统计数据（模型、输入、输出、缓存、调用次数）
 
   多 Agent:
@@ -2688,23 +3086,25 @@ def main():
     token-stats --uninstall            删除全局命令 + 自动清理 PATH
         """,
     )
-    parser.add_argument("--version", action="store_true", help="显示版本号")
-    parser.add_argument("--list-backends", action="store_true", help="列出本机已安装的 Agent")
+    parser.add_argument("-v", "--version", action="store_true", help="显示版本号")
+    parser.add_argument("-l", "--list-backends", action="store_true", help="列出本机已安装的 Agent")
     parser.add_argument("-a", "--agent", help="直接指定 Agent: hermes/claude-code/codex/openclaw")
-    parser.add_argument("--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
+    parser.add_argument("-w", "--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
                         help="实时监控模式（默认每 5 秒轮询）")
     parser.add_argument("setup_pos", nargs="?", const=True, help=argparse.SUPPRESS)
 
     # 时间段
-    parser.add_argument("--today", action="store_true", help="今日统计")
-    parser.add_argument("--yesterday", action="store_true", help="昨日统计")
+    parser.add_argument("-t", "--today", action="store_true", help="今日统计")
+    parser.add_argument("-y", "--yesterday", action="store_true", help="昨日统计")
     parser.add_argument("--week", action="store_true", help="本周统计")
     parser.add_argument("--last-7d", action="store_true", help="最近 7 天统计")
+    parser.add_argument("-m", "--month", action="store_true", help="本月统计")
+    parser.add_argument("--year", action="store_true", help="本年统计")
     parser.add_argument("--from", dest="from_date", help="开始日期 (YYYY-MM-DD)")
     parser.add_argument("--to", dest="to_date", help="结束日期 (YYYY-MM-DD)")
 
     # 功能
-    parser.add_argument("--export", nargs="?", const=True, default=None, metavar="目录",
+    parser.add_argument("-e", "--export", nargs="?", const=True, default=None, metavar="目录",
                         help="导出统计（交互式选择目录和格式）")
     parser.add_argument("--compare", action="store_true", help="对比模式")
     parser.add_argument("--a", help="对比时间段 A（today/yesterday/this-week/last-week/日期/日期段）")
@@ -2870,13 +3270,19 @@ def main():
         from_ts, to_ts = parse_time_label("this-week")
     elif args.last_7d:
         from_ts, to_ts = parse_time_label("last-7d")
+    elif args.month:
+        from_ts, to_ts = parse_time_label("this-month")
+    elif args.year:
+        from_ts, to_ts = parse_time_label("this-year")
 
     # ── Helper: collect agent data ──
     def _collect_agent_data(agents_list):
         results = []
         for agent in agents_list:
             try:
+                print(f"  ⏳ 正在收集 {agent.display_name()} 数据...", end="\r", flush=True)
                 data = agent.collect(from_ts=from_ts, to_ts=to_ts)
+                print(" " * 40, end="\r")
                 results.append((agent, data))
             except Exception as e:
                 print(f"❌ {agent.display_name()}: {e}")
@@ -2898,7 +3304,7 @@ def main():
         if args.export:
             results = _collect_agent_data(agents)
             if results:
-                export_multi(results)
+                export_multi(results, is_year=args.year, from_ts=from_ts, to_ts=to_ts)
         else:
             show_all(from_ts=from_ts, to_ts=to_ts)
         return
@@ -2930,7 +3336,7 @@ def main():
                 return
             results = _collect_agent_data(agents)
             if args.export:
-                export_multi(results)
+                export_multi(results, is_year=args.year, from_ts=from_ts, to_ts=to_ts)
             else:
                 for agent, data in results:
                     print(f"\n{'─'*50}")
@@ -2969,7 +3375,9 @@ def main():
 
     # ── 收集并展示 ──
     try:
+        print("  ⏳ 正在收集数据...", end="\r", flush=True)
         data = agent.collect(from_ts=from_ts, to_ts=to_ts)
+        print(" " * 30, end="\r")  # clear progress line
         print()
         print(data.raw)
         print()
@@ -2979,7 +3387,7 @@ def main():
 
     # ── --export (导出) ──
     if args.export:
-        export_interactive(data, agent)
+        export_interactive(data, agent, from_ts=from_ts, to_ts=to_ts, is_year=args.year)
 
     # --detail 在下一步也可能有用，但当前 collect() 已含 per_model 详情
     # detail 主要用于 watch/collect 输出内容更丰富，当前 collect 实现已包含

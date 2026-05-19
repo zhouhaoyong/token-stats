@@ -21,10 +21,10 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 
 | Feature | Command | Description |
 |---------|---------|-------------|
-| **Token stats** — by time range | `token-stats -a hermes --today` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
+| **Token stats** — by time range | `token-stats -a hermes --month` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
 | **Live monitor** — context tracking | `token-stats -a hermes --watch` | Per-round delta + cumulative, warns above 90%. macOS / Linux / Windows |
 | **Compare** — side-by-side periods | `--compare --a today --b yesterday` | Any time range, multi-model comparison with diff column |
-| **Export** — JSON / CSV | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
+| **Export** — XLSX / JSON | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
 | **Model detect** — proxy API verification | `token-stats -a <name>` | Auto-detects 69 models from 13 providers by actual API response name |
 
 ---
@@ -141,36 +141,35 @@ token-stats --version
 > ```
 
 
-`-b` accepts `hermes` / `claude-code` / `codex` / `openclaw`, comma-separated for multiple.
+## Usage
+
+`-a` accepts `hermes` / `claude-code` / `codex` / `openclaw`, comma-separated for multiple.
+
+### Interactive Menu
 
 ```bash
-# Current snapshot
 token-stats                           # interactive picker
-token-stats -a hermes                 # direct
-token-stats -a hermes,claude-code     # multi-agent
-token-stats --all                     # all agents
+token-stats -a hermes                 # skip menu, go straight to Hermes
+token-stats -a hermes,claude-code     # multiple agents
+token-stats --all                     # all agents at once
+```
 
-# Time range
+### Snapshot & Time Ranges
+
+```bash
+# Current snapshot (default)
+token-stats -a hermes
+
+# Quick time ranges
 token-stats -a hermes --today         # today
 token-stats -a hermes --yesterday     # yesterday
-token-stats -a hermes --week          # this week
+token-stats -a hermes --week          # this week (from Monday)
+token-stats -a hermes --last-7d       # last 7 days
+token-stats -a hermes --month         # this month
+token-stats -a hermes --year          # this year
+
+# Custom range
 token-stats -a hermes --from 2026-01-01 --to 2026-05-18
-
-# Compare
-token-stats -a hermes --compare --a today --b yesterday
-
-# Export
-token-stats -a hermes --export
-token-stats --all --today --export
-
-# Live monitor
-token-stats -a hermes --watch
-token-stats -a claude-code --watch 2  # 2s interval
-
-# Maintenance
-token-stats --list-backends           # installed agents
-token-stats --setup                   # create global command
-token-stats --uninstall               # remove global command
 ```
 
 Snapshot output:
@@ -179,37 +178,57 @@ Snapshot output:
   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 缓存 480.6K | 调用 13 次
 
 📊 Claude Code
-  deepseek-v4-pro | 总计 11.83M | 输入 8.07M | 输出 3.76M | 缓存 2116.08M | 调用 8274 次
+  deepseek-v4-pro | 总计/+缓存 11.83M/2.07G | 输入 8.07M | 输出 3.76M | 调用 8274 次
 ```
 
-### Common scenarios
+### Live Monitor
+
+Watch token consumption in real time while using your agent:
 
 ```bash
-# Today — all agents
-token-stats --all --today
-
-# Today — specific agent + export
-token-stats -a hermes --today --export
-
-# This month — all agents + export
-token-stats --all --from 2026-05-01 --to 2026-05-31 --export
-
-# Today vs yesterday
-token-stats -a hermes --compare --a today --b yesterday
-
-# Custom date range comparison
-token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
-
-# Multi-agent + time range
-token-stats -a hermes,claude-code --from 2026-05-01 --to 2026-05-18
-
-# Live monitor (Ctrl+C to stop)
-token-stats -a hermes --watch
+token-stats -a hermes --watch         # refresh every 5s (default)
+token-stats -a claude-code --watch 2  # refresh every 2s
 ```
 
-### Context alerts
+- Context > 60% → suggests `/compact`; > 90% → warning
+- `Ctrl+C` to stop and see a monitoring summary
 
-> 💡 During `--watch`, type `/compact` above 60%, `/new` above 90%. Works on all platforms.
+### Compare
+
+Side-by-side comparison of two time periods with diff columns:
+
+```bash
+# Quick label comparison
+token-stats -a hermes --compare --a today --b yesterday
+token-stats -a hermes --compare --a this-week --b last-week
+
+# Custom date comparison
+token-stats -a hermes --compare --a 2026-01-01 --b 2026-01-15
+
+# Date range comparison
+token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+```
+
+Compare labels: `today`, `yesterday`, `this-week`, `last-week`, `this-month`, `last-month`, `this-year`, `last-year`, `YYYY-MM-DD`, `YYYY-MM-DD~YYYY-MM-DD`
+
+### Export
+
+Interactive directory and format picker (XLSX / JSON):
+
+```bash
+# Basic export
+token-stats -a hermes --export
+
+# Export with time range
+token-stats -a hermes --today --export
+token-stats -a hermes --month --export
+token-stats -a hermes --year --export
+
+# All agents export
+token-stats --all --today --export
+token-stats --all --month --export
+token-stats --all --year --export
+```
 
 ### What each agent shows
 
@@ -259,6 +278,54 @@ Prefix matching is supported. Unknown models default to 128K.
 | **Mistral** | `mistral-large-2`, `mistral-large`, `mistral-small` | 128K |
 | **xAI / Grok** | `grok-3`, `grok-2` | 128K |
 | **Yi / 01.AI** | `yi-large`, `yi-lightning` | 16K~32K |
+
+---
+
+## Common Scenarios
+
+**How much did I spend today?**
+```bash
+token-stats --all --today
+```
+
+**This month — all agents summary**
+```bash
+token-stats --all --month
+```
+
+**This month — all agents export**
+```bash
+token-stats --all --month --export
+```
+
+**This year — all agents export**
+```bash
+token-stats --all --year --export
+```
+
+**This week vs last week**
+```bash
+token-stats -a hermes --compare --a this-week --b last-week
+```
+
+**This month vs last month**
+```bash
+token-stats -a hermes --compare --a this-month --b last-month
+```
+
+**Watch consumption in real time**
+```bash
+token-stats -a hermes --watch
+# Switch to Hermes, watch tokens update live
+```
+
+**Multiple agents + time range**
+```bash
+token-stats -a hermes,claude-code --month
+```
+
+---
+
 ## Uninstall
 
 ```bash

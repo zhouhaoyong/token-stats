@@ -8,10 +8,10 @@
 
 | 功能 | 命令 | 说明 |
 |------|------|------|
-| **Token 消耗统计** — 指定时间范围 | `token-stats -a hermes --today` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
+| **Token 消耗统计** — 指定时间范围 | `token-stats -a hermes --month` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
 | **实时监控** — 上下文占比追踪 | `token-stats -a hermes --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
 | **时段对比** — 两个时间段并排比较 | `--compare --a today --b yesterday` | 任意时间段聚合，多模型横向对比，带差值列 |
-| **数据导出** — JSON / CSV | `--export` | 多 Agent、多时间段组合，交互式选目录 |
+| **数据导出** — XLSX / JSON | `--export` | 多 Agent、多时间段组合，交互式选目录；年度按月拆分 |
 | **模型识别** — 中转站 API 校验 | `token-stats -a <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
 
 ---
@@ -136,7 +136,7 @@ token-stats --list-backends
 token-stats -a hermes
 # 输出示例:
 # 📊 Hermes
-#   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
+#   deepseek-v4-flash | 总计/+缓存 62.4K/480.6K | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
 ```
 
 如果以上三条都正常输出，说明安装完全成功 🎉
@@ -159,85 +159,163 @@ token-stats --version
 
 ## 用法
 
-`-b` 支持 `hermes` / `claude-code` / `codex` / `openclaw`，逗号分隔可查多个。
+`-a` 支持 `hermes` / `claude-code` / `codex` / `openclaw`，逗号分隔可查多个。
 
+| 短参数 | 长参数 | 说明 |
+|:---:|---|---|
+| `-t` | `--today` | 今日统计 |
+| `-y` | `--yesterday` | 昨日统计 |
+| `-m` | `--month` | 本月统计 |
+| `-w` | `--watch` | 实时监控（默认 5 秒刷新） |
+| `-e` | `--export` | 导出为 XLSX/JSON（交互式选择） |
+| `-v` | `--version` | 显示版本号 |
+| `-l` | `--list-backends` | 列出本机已安装的 Agent |
+| `-a` | `--agent` | 指定 Agent（必选，除非交互式菜单） |
+
+### 交互式菜单
+
+无参数直接运行，弹出菜单选择目标 Agent。适合不确定要看哪个 Agent 时使用。
+
+弹出菜单，交互式选择 Agent：
 ```bash
-# 当前快照
-token-stats                           # 交互式选择
-token-stats -a hermes                 # 直接指定
-token-stats -a hermes,claude-code     # 多 Agent
-token-stats --all                     # 所有 Agent
-
-# 时间段
-token-stats -a hermes --today         # 今日
-token-stats -a hermes --yesterday     # 昨日
-token-stats -a hermes --week          # 本周
-token-stats -a hermes --from 2026-01-01 --to 2026-05-18
-
-# 对比
-token-stats -a hermes --compare --a today --b yesterday
-
-# 导出
-token-stats -a hermes --export
-token-stats --all --today --export
-
-# 实时监控
-token-stats -a hermes --watch
-token-stats -a claude-code --watch 2  # 2 秒刷新
-
-# 维护
-token-stats --list-backends           # 列出已安装的 Agent
-token-stats --setup                   # 安装全局命令
-token-stats --uninstall               # 卸载
+token-stats
 ```
 
-输出示例（当前快照）：
+跳过菜单，直接查看某个 Agent 的全部历史：
+```bash
+token-stats -a hermes
+```
+
+同时查看多个 Agent（逗号分隔）：
+```bash
+token-stats -a hermes,claude-code
+```
+
+查看本机所有 Agent 的统计数据：
+```bash
+token-stats --all
+```
+
+
+### 快照与时间段
+
+按指定时间段筛选统计数据，支持快捷参数和自定义日期范围。
+
+全部历史快照（默认）：
+```bash
+token-stats -a hermes
+```
+
+今日 / 昨日统计：
+```bash
+token-stats -a hermes -t
+token-stats -a hermes -y
+```
+
+本周（周一起至今）/ 最近 7 天：
+```bash
+token-stats -a hermes --week
+token-stats -a hermes --last-7d
+```
+
+本月（1 日至今）/ 本年（1 月 1 日至今）：
+```bash
+token-stats -a hermes -m
+token-stats -a hermes --year
+```
+
+自定义日期范围：
+```bash
+token-stats -a hermes --from 2026-01-01 --to 2026-05-18
+```
+
+
+输出示例（快照）：
 ```
 📊 Hermes
-  deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 缓存 480.6K | 调用 13 次
+  deepseek-v4-flash | 总计/+缓存 62.4K/480.6K | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
 
 📊 Claude Code
-  deepseek-v4-pro | 总计 11.83M | 输入 8.07M | 输出 3.76M | 缓存 2116.08M | 调用 8274 次
+  deepseek-v4-pro | 总计/+缓存 11.83M/2.07G | 输入 8.07M | 输出 3.76M | 调用 8274 次
 ```
 
 输出示例（时间段）：
 ```
 📊 Hermes
-  deepseek-v4-flash | 总计 988.9K | 输入 660.5K | 输出 327.0K | 缓存 72.66M | 调用 699 次 | 4 轮会话
+  deepseek-v4-flash | 总计/+缓存 988.9K/72.66M | 输入 660.5K | 输出 327.0K | 调用 699 次 | 4 轮会话
 ```
 
-### 常见场景
 
+### 实时监控
+
+边用 Agent 边看 token 消耗，随会话实时刷新。
+
+默认 5 秒刷新，查看实时消耗：
 ```bash
-# 今天所有 Agent 的消耗
-token-stats --all --today
-
-# 今天指定 Agent + 导出
-token-stats -a hermes --today --export
-
-# 本周 Claude Code 的用量
-token-stats -a claude-code --week
-
-# 本月所有 Agent 统计并导出
-token-stats --all --from 2026-05-01 --to 2026-05-31 --export
-
-# 今天 vs 昨天对比
-token-stats -a hermes --compare --a today --b yesterday
-
-# 指定时间段对比
-token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
-
-# 多 Agent 指定时间段
-token-stats -a hermes,claude-code --from 2026-05-01 --to 2026-05-18
-
-# 全 Agent 今天数据导出 JSON
-token-stats --all --today --export
-
-# 实时监控（边聊边看，Ctrl+C 停止看汇总）
-token-stats -a hermes --watch
+token-stats -a hermes -w
 ```
 
-### 上下文占比提醒
+自定义刷新间隔（秒）：
+```bash
+token-stats -a claude-code -w 2
+```
+
+- 显示每轮增量（+N tokens）和当前累计值
+- 上下文占比 > 60% 提示 `/compact`，> 90% 预警
+- 每轮显示 📅 今日合计，所有列自动对齐
+- `Ctrl+C` 停止后展示本次监控完整汇总
+
+
+### 时段对比
+
+两个时间段并排比较，带差值列。
+
+今天 vs 昨天：
+```bash
+token-stats -a hermes --compare --a today --b yesterday
+```
+
+本周 vs 上周 / 本月 vs 上月：
+```bash
+token-stats -a hermes --compare --a this-week --b last-week
+token-stats -a hermes --compare --a this-month --b last-month
+```
+
+今年 vs 去年 / 两个自定义日期：
+```bash
+token-stats -a hermes --compare --a this-year --b last-year
+token-stats -a hermes --compare --a 2026-01-01 --b 2026-01-15
+```
+
+两段日期范围对比：
+```bash
+token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+```
+
+支持对比标签：`today`、`yesterday`、`this-week`、`last-week`、`this-month`、`last-month`、`this-year`、`last-year`、`YYYY-MM-DD`、`YYYY-MM-DD~YYYY-MM-DD`
+
+
+### 数据导出
+
+交互式选择目录和格式 [1] XLSX / [2] JSON。带 `--year` 时自动按月拆分（1~12 月分列 + 总计行）。
+
+导出当前快照：
+```bash
+token-stats -a hermes -e
+```
+
+导出指定时间段：
+```bash
+token-stats -a hermes -t -e           # 今日
+token-stats -a hermes -m -e           # 本月
+token-stats -a hermes --year -e       # 本年（按月拆分）
+```
+
+导出所有 Agent：
+```bash
+token-stats --all -t -e               # 所有 Agent 今日
+token-stats --all --year -e           # 所有 Agent 年度按月拆分
+```
 
 ### 各 Agent 的数据怎么看
 
@@ -292,24 +370,51 @@ Agent 跑在 WSL2 中时，`token-stats` 在 Windows 侧自动检测并读取数
 
 ---
 
-## 实用场景
+## 常见场景
 
-**想知道 Hermes 用了多少上下文？**
+**今天用了多少 token？** — 查看所有 Agent 的今日消耗汇总
 ```bash
-token-stats
-# 选 1 → 看到 "上下文: 123.4K/1M (11.8% ✅)"
+token-stats --all -t
 ```
 
-**边用 Claude Code 边盯着消耗？**
+**本月用量汇总** — 查看所有 Agent 本月消耗
 ```bash
-token-stats -a claude-code --watch
-# 切到 Claude Code 干活，这边实时跳动 tokens
+token-stats --all -m
 ```
 
-**想换 Agent 了？**
+**实时盯着消耗** — 边用 Agent 边看 token 跳动
 ```bash
-token-stats
-# 再选一次就行
+token-stats -a hermes -w
+```
+
+**导出本月数据** — 导出为 XLSX 方便存档分析
+```bash
+token-stats --all -m -e
+```
+
+**导出年度数据** — 自动按月拆分，Excel 中 1~12 月分列
+```bash
+token-stats --all --year -e
+```
+
+**本周 vs 上周** — 对比两周的用量变化
+```bash
+token-stats -a hermes --compare --a this-week --b last-week
+```
+
+**本月 vs 上月** — 对比两个月的用量变化
+```bash
+token-stats -a hermes --compare --a this-month --b last-month
+```
+
+**多 Agent 指定时间段** — 同时查看多个 Agent 的本月数据
+```bash
+token-stats -a hermes,claude-code -m
+```
+
+**查看本机装了哪些 Agent** — 确认可统计的 AI 助手
+```bash
+token-stats -l
 ```
 
 ---
