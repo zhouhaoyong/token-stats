@@ -920,7 +920,7 @@ class BaseAgent(ABC):
                 print(f"── [{ts}] {' '.join(summary_parts)} ──")
 
                 # 增量行
-                print("  ╌" * 20)
+                print("  ╌" * 30)
                 # 先检查是否有任何模型有缓存数据（保证列一致）
                 any_cache_now = any(
                     mv.get("cache", 0) or (mv.get("cache", 0) - bl_models.get(mn, {}).get("cache", 0))
@@ -974,7 +974,7 @@ class BaseAgent(ABC):
                             bl_models[mn] = mv
                 if idle_models:
                     print(f"  (未使用: {', '.join(idle_models)})")
-                print("  ╌" * 20)
+                print("  ╌" * 30)
 
                 # 📅 今日合计
                 try:
@@ -1007,7 +1007,7 @@ class BaseAgent(ABC):
                         aligned = _align_rows(today_rows)
                         for row in aligned:
                             print(f"  {' | '.join(row)}")
-                    print("  ╌" * 20)
+                    print("  ╌" * 30)
                 except Exception:
                     pass
             else:
@@ -1077,7 +1077,7 @@ class BaseAgent(ABC):
                     aligned = _align_rows(today_rows)
                     for row in aligned:
                         print(f"  {' | '.join(row)}")
-                    print("  ╌" * 20)
+                    print("  ╌" * 30)
             except Exception:
                 pass
 
@@ -1102,7 +1102,7 @@ class BaseAgent(ABC):
 
             if delta_data:
                 print(f"\n  监控期间增量:")
-                print("  ╌" * 20)
+                print("  ╌" * 30)
                 inc_rows = []
                 for (mn, d_tok, d_in, d_out, d_cache, d_calls) in delta_data:
                     cols = [mn, f"+{fmt_num(d_tok)}总计", f"+{fmt_num(d_in)}入", f"+{fmt_num(d_out)}出"]
@@ -1121,7 +1121,7 @@ class BaseAgent(ABC):
                         sum_parts.append(f"+{fmt_num(total_d_cache)}存")
                     sum_parts.append(f"+{total_d_calls}调用")
                     print(f"  增量合计 | {' | '.join(sum_parts)}")
-                print("  ╌" * 20)
+                print("  ╌" * 30)
         else:
             print("  监控期间无数据")
         print("👋 监控已停止")
@@ -1412,23 +1412,6 @@ class ClaudeCodeAgent(BaseAgent):
         native = os.path.join(os.path.expanduser("~"), ".claude")
         return cd != native
 
-    @staticmethod
-    def _ts_in_range(ts_str: str, from_ts: float = None, to_ts: float = None) -> bool:
-        """Check if an ISO timestamp string falls within the given Unix time range."""
-        if from_ts is None and to_ts is None:
-            return True
-        try:
-            # Parse ISO 8601 timestamp (e.g. '2026-05-14T18:07:28.252Z')
-            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            msg_ts = dt.timestamp()
-            if from_ts is not None and msg_ts < from_ts:
-                return False
-            if to_ts is not None and msg_ts > to_ts:
-                return False
-            return True
-        except (ValueError, TypeError):
-            return True  # can't parse → include to be safe
-
     def _find_sessions(self, from_ts: float = None, to_ts: float = None):
         projects_dir = os.path.join(_find_claude_dir(), "projects")
         if not os.path.isdir(projects_dir):
@@ -1446,46 +1429,74 @@ class ClaudeCodeAgent(BaseAgent):
         return sorted(sessions, key=lambda x: os.path.getmtime(x[2]), reverse=True)
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
-        sessions = self._find_sessions()
-        if not sessions:
-            return AgentData(
-                name="claude-code", display_name="Claude Code",
-                stats={}, raw="Claude Code: 尚无会话记录"
-            )
+        # 首次调用时读取所有 JSONL 并缓存消息，后续调用直接过滤缓存
+        if not hasattr(self, '_cache'):
+            self._cache = []
+            self._cached_sub_count = 0
+            self._cached_session_count = 0
+            self._cached_project_count = 0
 
+            sessions = self._find_sessions()
+            self._cached_session_count = len(sessions)
+            projects = set()
+
+            if not sessions:
+                self._cached_project_count = 0
+            else:
+                for proj, fname, fpath in sessions:
+                    projects.add(proj)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            for line in f:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    msg = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue
+                                # 子代理计数（所有消息类型）
+                                if msg.get("toolUseResult") and "usage" in msg["toolUseResult"]:
+                                    self._cached_sub_count += 1
+                                if msg.get("type") != "assistant":
+                                    continue
+                                model = msg.get("message", {}).get("model") or msg.get("model", "unknown")
+                                usage = msg.get("message", {}).get("usage") or msg.get("usage", {})
+                                # 预解析时间戳
+                                ts_str = msg.get("timestamp", "")
+                                try:
+                                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                    msg_ts = dt.timestamp()
+                                except (ValueError, TypeError):
+                                    msg_ts = None
+                                self._cache.append({
+                                    'ts': msg_ts,
+                                    'model': model,
+                                    'input': usage.get('input_tokens', 0),
+                                    'output': usage.get('output_tokens', 0),
+                                    'cache': usage.get('cache_read_input_tokens', 0),
+                                })
+                    except Exception:
+                        continue
+                self._cached_project_count = len(projects)
+
+        # 从缓存中按时间范围过滤
         per_model_data = {}
-        total_sub = 0
-        project_names = set()
-
-        for proj, fname, fpath in sessions:
-            project_names.add(proj)
-            try:
-                with open(fpath, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            msg = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if msg.get("type") == "assistant":
-                            if not self._ts_in_range(msg.get("timestamp", ""), from_ts, to_ts):
-                                continue
-                            model = msg.get("message", {}).get("model") or msg.get("model", "unknown")
-                            if model.startswith("<"):
-                                model = "subagent"
-                            if model not in per_model_data:
-                                per_model_data[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
-                            usage = msg.get("message", {}).get("usage") or msg.get("usage", {})
-                            per_model_data[model]["input"] += usage.get("input_tokens", 0)
-                            per_model_data[model]["output"] += usage.get("output_tokens", 0)
-                            per_model_data[model]["cache"] += usage.get("cache_read_input_tokens", 0)
-                            per_model_data[model]["calls"] += 1
-                        if msg.get("toolUseResult") and "usage" in msg["toolUseResult"]:
-                            total_sub += 1
-            except Exception:
-                continue
+        for msg in self._cache:
+            if msg['ts'] is not None:
+                if from_ts is not None and msg['ts'] < from_ts:
+                    continue
+                if to_ts is not None and msg['ts'] > to_ts:
+                    continue
+            model = msg['model']
+            if model.startswith("<"):
+                model = "subagent"
+            if model not in per_model_data:
+                per_model_data[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+            per_model_data[model]["input"] += msg['input']
+            per_model_data[model]["output"] += msg['output']
+            per_model_data[model]["cache"] += msg['cache']
+            per_model_data[model]["calls"] += 1
 
         if not per_model_data:
             return AgentData(
@@ -1499,7 +1510,6 @@ class ClaudeCodeAgent(BaseAgent):
         total_cache = sum(d["cache"] for d in per_model_data.values())
         models_sorted = sorted(per_model_data.keys())
 
-        # 过滤掉无效模型（input+output=0，无实际数据）
         meaningful_models = [
             mn for mn in models_sorted
             if per_model_data[mn]["input"] + per_model_data[mn]["output"] > 0
@@ -1525,7 +1535,7 @@ class ClaudeCodeAgent(BaseAgent):
             if line:
                 raw_lines.append(line)
         raw_lines.append(f"  ────────────────────────────────────")
-        raw_lines.append(f"  子代理: {total_sub} 次 | 会话: {len(sessions)} 个 | 项目: {len(project_names)} 个")
+        raw_lines.append(f"  子代理: {self._cached_sub_count} 次 | 会话: {self._cached_session_count} 个 | 项目: {self._cached_project_count} 个")
         raw = "\n".join(raw_lines)
 
         stats = {
@@ -1534,10 +1544,10 @@ class ClaudeCodeAgent(BaseAgent):
             "output_tokens": total_output,
             "cache_read": total_cache,
             "api_calls": total_calls,
-            "sub_calls": total_sub,
+            "sub_calls": self._cached_sub_count,
             "total_tokens": total_input + total_output,
-            "session_count": len(sessions),
-            "projects": len(project_names),
+            "session_count": self._cached_session_count,
+            "projects": self._cached_project_count,
         }
 
         return AgentData(name="claude-code", display_name="Claude Code",
@@ -2283,53 +2293,112 @@ HDR_STYLE = 1  # 白字蓝底
 TOT_STYLE = 2  # 加粗蓝底
 
 
-def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models,
-                       today_calls_by_model, date_str):
+def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
+    """单 Agent 简单 XLSX（含 Agent 列 + 合并单元格 + 合计行）。"""
     wb = _XLSXWriter()
-    col_widths = {'A': 22}
-    for i in range(2, 9):
+    col_widths = {'A': 18, 'B': 22}
+    for i in range(3, 9):
         col_widths[wb._col_letter(i)] = 16
-    wb.add_sheet(agent_display, col_widths=col_widths)
-    headers = ['模型', '输入', '输出', '缓存', '调用', '今日调用', '总计', '总计(含缓存)']
+    merges = []
+    wb.add_sheet(agent_display, col_widths=col_widths, merges=merges, freeze='C2')
+    headers = ['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)']
     wb.add_row(agent_display, [(h, HDR_STYLE) for h in headers])
+    row_num = 2
+    ms = row_num
     for pm in filtered_models:
         inp = int(pm.get('input', 0))
         out = int(pm.get('output', 0))
         cache = int(pm.get('cache', 0))
         calls = int(pm.get('calls', 0))
         model = pm.get('model', 'unknown')
-        tc = today_calls_by_model.get(model, 0)
-        wb.add_row(agent_display, [model, inp, out, cache, calls, tc, inp + out, inp + out + cache])
-    if len(filtered_models) > 1:
-        ti = int(sum(pm.get('input', 0) for pm in filtered_models))
-        to = int(sum(pm.get('output', 0) for pm in filtered_models))
-        tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
-        tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
-        ttoday = sum(today_calls_by_model.values())
-        wb.add_row(agent_display, [
-            ('合计', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
-            (tc, TOT_STYLE), (tca, TOT_STYLE), (ttoday, TOT_STYLE),
-            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+        wb.add_row(agent_display, [agent_display, model, inp, out, cache, calls, inp + out, inp + out + cache])
+        row_num += 1
+    if filtered_models:
+        merges.append((ms, 1, row_num - 1, 1))
+    # 合计行
+    ti = int(sum(pm.get('input', 0) for pm in filtered_models))
+    to = int(sum(pm.get('output', 0) for pm in filtered_models))
+    tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
+    tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
+    wb.add_row(agent_display, [
+        ('合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
+        (tc, TOT_STYLE), (tca, TOT_STYLE),
+        (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+    wb.merges[agent_display] = merges
     wb.save(filepath)
 
+
+def _write_xlsx_multi_simple(filepath, results):
+    """多 Agent 简单 XLSX（Agent 列合并单元格 + 每个 Agent 单独合计 + 总合计）。"""
+    wb = _XLSXWriter()
+    col_widths = {'A': 18, 'B': 22}
+    for i in range(3, 9):
+        col_widths[wb._col_letter(i)] = 16
+    merges = []
+    wb.add_sheet('多Agent统计', col_widths=col_widths, merges=merges, freeze='C2')
+    headers = ['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)']
+    wb.add_row('多Agent统计', [(h, HDR_STYLE) for h in headers])
+    row_num = 2
+    grand_ti = grand_to = grand_tc = grand_tca = 0
+    total_agents = 0
+    for agent, data in results:
+        agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+        if not agent_models:
+            continue
+        total_agents += 1
+        ms = row_num
+        ti = to = tc = tca = 0
+        for pm in agent_models:
+            inp = int(pm.get('input', 0))
+            out = int(pm.get('output', 0))
+            cache = int(pm.get('cache', 0))
+            calls = int(pm.get('calls', 0))
+            model = pm.get('model', 'unknown')
+            wb.add_row('多Agent统计', [agent.display_name(), model, inp, out, cache, calls, inp + out, inp + out + cache])
+            ti += inp; to += out; tc += cache; tca += calls
+            row_num += 1
+        merges.append((ms, 1, row_num - 1, 1))
+        # Agent 合计
+        wb.add_row('多Agent统计', [
+            (f'{agent.display_name()} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE),
+            (to, TOT_STYLE), (tc, TOT_STYLE), (tca, TOT_STYLE),
+            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+        row_num += 1
+        grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
+    # 全部总计
+    if total_agents > 1:
+        gtt = grand_ti + grand_to
+        wb.add_row('多Agent统计', [
+            ('全部总计', TOT_STYLE), ('', TOT_STYLE), (grand_ti, TOT_STYLE),
+            (grand_to, TOT_STYLE), (grand_tc, TOT_STYLE), (grand_tca, TOT_STYLE),
+            (gtt, TOT_STYLE), (gtt + grand_tc, TOT_STYLE)])
+    wb.merges['多Agent统计'] = merges
+    wb.save(filepath)
+
+
 def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_months):
-    """单 Agent 年度 XLSX，按月拆分列。"""
+    """单 Agent 年度 XLSX，按月拆分列，含 Agent 列合并 + 合计。"""
     wb = _XLSXWriter()
     month_count = len(all_months)
     all_models = sorted({m for d in monthly_data.values() for m in d})
-    col_widths = {'A': 22, 'B': 14}
+    # A=Agent, B=Model, C=Metric, then months, then 合计
+    col_widths = {'A': 18, 'B': 22, 'C': 14}
     for i in range(month_count):
-        col_widths[wb._col_letter(3 + i)] = 16
-    col_widths[wb._col_letter(3 + month_count)] = 16
+        col_widths[wb._col_letter(4 + i)] = 16
+    col_widths[wb._col_letter(4 + month_count)] = 16
     merges = []
-    wb.add_sheet(agent_display, col_widths=col_widths, merges=merges, freeze='C2')
-    headers = ['Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
+    wb.add_sheet(agent_display, col_widths=col_widths, merges=merges, freeze='D2')
+    headers = ['Agent', 'Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
     wb.add_row(agent_display, [(h, HDR_STYLE) for h in headers])
     row_num = 2
+    ag_ms = row_num  # agent merge start
     for model in all_models:
         ms = row_num
         for metric in _METRIC_ORDER:
-            vals = [('' if metric != 'input' else model, 0), (_METRIC_LABELS[metric], 0)]
+            vals = [
+                ('' if (model == all_models[0] and metric == 'input') else '', 0),
+                ('' if metric != 'input' else model, 0),
+                (_METRIC_LABELS[metric], 0)]
             tot = 0
             for m_label in all_months:
                 md = monthly_data[m_label].get(model, {})
@@ -2344,10 +2413,16 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
             vals.append((int(tot), 0))
             wb.add_row(agent_display, vals)
             row_num += 1
-        merges.append((ms, 1, row_num - 1, 1))
+        merges.append((ms, 2, row_num - 1, 2))  # Model merge
+    if all_models:
+        merges.append((ag_ms, 1, row_num - 1, 1))  # Agent merge
+    # 合计行
     gt = row_num
     for metric in _METRIC_ORDER:
-        vals = [('' if metric != 'input' else '合计', TOT_STYLE), (_METRIC_LABELS[metric], TOT_STYLE)]
+        vals = [
+            ('' if metric != 'input' else '合计', TOT_STYLE),
+            ('', TOT_STYLE),
+            (_METRIC_LABELS[metric], TOT_STYLE)]
         gt_all = 0
         for m_label in all_months:
             ct = 0
@@ -2370,7 +2445,7 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
 
 
 def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order):
-    """多 Agent 年度 XLSX，全部 Agent 在一个 Sheet。"""
+    """多 Agent 年度 XLSX，全部 Agent 在一个 Sheet，含每个 Agent 单独合计 + 总合计。"""
     wb = _XLSXWriter()
     month_count = len(all_months)
     col_widths = {'A': 18, 'B': 22, 'C': 14}
@@ -2378,90 +2453,290 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
         col_widths[wb._col_letter(4 + i)] = 16
     col_widths[wb._col_letter(4 + month_count)] = 16
     merges = []
-    wb.add_sheet('年度统计', col_widths=col_widths, merges=merges, freeze='D2')
+    sheet_name = '年度统计'
+    wb.add_sheet(sheet_name, col_widths=col_widths, merges=merges, freeze='D2')
     headers = ['Agent', 'Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
-    wb.add_row('年度统计', [(h, HDR_STYLE) for h in headers])
-    all_rows = []
+    # 手动管理行列表，避免插入时行号计算错误
+    rows_data = []  # [(row_values, row_type), ...]
     for agent_name, agent_display, monthly_data in agent_order:
         all_models = sorted({m for d in monthly_data.values() for m in d})
+        if not all_models:
+            continue
         for model in all_models:
-            all_rows.append((agent_name, agent_display, model, monthly_data))
-    row_num = 2
-    for agent_name, agent_display, model, monthly_data in all_rows:
-        ms = row_num
+            for metric in _METRIC_ORDER:
+                vals = [
+                    ('' if metric != 'input' else agent_display, 0),
+                    ('' if metric != 'input' else model, 0),
+                    (_METRIC_LABELS[metric], 0)]
+                tot = 0
+                for m_label in all_months:
+                    md = monthly_data[m_label].get(model, {})
+                    if metric == 'total':
+                        v = md.get('input', 0) + md.get('output', 0)
+                    elif metric == 'total_with_cache':
+                        v = md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                    else:
+                        v = md.get(metric, 0)
+                    tot += v
+                    vals.append((int(v), 0))
+                vals.append((int(tot), 0))
+                rows_data.append((vals, 'data', agent_name, agent_display, model))
+        # Agent 合计行
         for metric in _METRIC_ORDER:
             vals = [
-                ('' if metric != 'input' else agent_display, 0),
-                ('' if metric != 'input' else model, 0),
-                (_METRIC_LABELS[metric], 0)]
-            tot = 0
+                ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
+                ('', TOT_STYLE),
+                (_METRIC_LABELS[metric], TOT_STYLE)]
+            ag_total = 0
             for m_label in all_months:
-                md = monthly_data[m_label].get(model, {})
-                if metric == 'total':
-                    v = md.get('input', 0) + md.get('output', 0)
-                elif metric == 'total_with_cache':
-                    v = md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
-                else:
-                    v = md.get(metric, 0)
-                tot += v
-                vals.append((int(v), 0))
-            vals.append((int(tot), 0))
-            wb.add_row('年度统计', vals)
-            row_num += 1
-        merges.append((ms, 1, row_num - 1, 1))
-        merges.append((ms, 2, row_num - 1, 2))
+                ct = 0
+                for model in all_models:
+                    md = monthly_data[m_label].get(model, {})
+                    if metric == 'total':
+                        ct += md.get('input', 0) + md.get('output', 0)
+                    elif metric == 'total_with_cache':
+                        ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                    else:
+                        ct += md.get(metric, 0)
+                ag_total += ct
+                vals.append((int(ct), TOT_STYLE))
+            vals.append((int(ag_total), TOT_STYLE))
+            rows_data.append((vals, 'agent_subtotal', agent_name, agent_display, None))
+
+    # 写入 header
+    wb.add_row(sheet_name, [(h, HDR_STYLE) for h in headers])
+    row_num = 2
+    # 追踪 agent merge ranges
+    agent_ranges = {}  # agent_name -> [start_row, end_row]
+    model_ranges = {}  # (agent_name, model) -> [start_row, end_row]
+    current_agent = None
+    current_model = None
+    agent_start = None
+    model_start = None
+
+    for vals, rtype, ag_name, ag_display, model in rows_data:
+        wb.add_row(sheet_name, vals)
+        if rtype == 'data':
+            if ag_name != current_agent:
+                if current_agent is not None:
+                    agent_ranges[current_agent] = (agent_start, row_num - 1)
+                current_agent = ag_name
+                agent_start = row_num
+            if model != current_model or ag_name != (current_agent if current_agent != ag_name else current_agent):
+                if current_model is not None and current_agent == ag_name:
+                    model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
+                current_model = model
+                model_start = row_num
+        row_num += 1
+
+    if current_agent is not None:
+        agent_ranges[current_agent] = (agent_start, row_num - 1)
+    if current_model is not None and current_agent is not None:
+        model_ranges[(current_agent, current_model)] = (model_start, row_num - 1)
+
+    # 构建 merges
+    for ag_name, (sr, er) in agent_ranges.items():
+        merges.append((sr, 1, er, 1))
+    for (ag_name, model), (sr, er) in model_ranges.items():
+        merges.append((sr, 2, er, 2))
+
+    # 全部总计
     gt = row_num
     for metric in _METRIC_ORDER:
-        vals = [('' if metric != 'input' else '全部总计', TOT_STYLE), ('', TOT_STYLE),
+        vals = [('', TOT_STYLE) if metric != 'input' else ('全部总计', TOT_STYLE), ('', TOT_STYLE),
                 (_METRIC_LABELS[metric], TOT_STYLE)]
         gt_all = 0
         for m_label in all_months:
             ct = 0
-            for _, _, model, monthly_data in all_rows:
-                md = monthly_data[m_label].get(model, {})
-                if metric == 'total':
-                    ct += md.get('input', 0) + md.get('output', 0)
-                elif metric == 'total_with_cache':
-                    ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
-                else:
-                    ct += md.get(metric, 0)
+            for ag_name, ag_display, monthly_data in agent_order:
+                for model in sorted({m for d in monthly_data.values() for m in d}):
+                    md = monthly_data[m_label].get(model, {})
+                    if metric == 'total':
+                        ct += md.get('input', 0) + md.get('output', 0)
+                    elif metric == 'total_with_cache':
+                        ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                    else:
+                        ct += md.get(metric, 0)
             gt_all += ct
             vals.append((int(ct), TOT_STYLE))
         vals.append((int(gt_all), TOT_STYLE))
-        wb.add_row('年度统计', vals)
+        wb.add_row(sheet_name, vals)
         row_num += 1
     merges.append((gt, 1, row_num - 1, 1))
     merges.append((gt, 2, row_num - 1, 2))
-    wb.merges['年度统计'] = merges
+    wb.merges[sheet_name] = merges
     wb.save(filepath)
+
+
+# ═══════════════════════════════════════════════════
+#  CSV 导出
+# ═══════════════════════════════════════════════════
+
+def _write_csv_simple(filepath, agent_name, agent_display, filtered_models):
+    """单 Agent 简单 CSV。"""
+    import csv
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)'])
+        ti = to = tc = tca = 0
+        for pm in filtered_models:
+            inp = int(pm.get('input', 0))
+            out = int(pm.get('output', 0))
+            cache = int(pm.get('cache', 0))
+            calls = int(pm.get('calls', 0))
+            model = pm.get('model', 'unknown')
+            w.writerow([agent_display, model, inp, out, cache, calls, inp + out, inp + out + cache])
+            ti += inp; to += out; tc += cache; tca += calls
+        w.writerow(['合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+
+
+def _write_csv_multi_simple(filepath, results):
+    """多 Agent 简单 CSV，含每个 Agent 单独合计 + 总合计。"""
+    import csv
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)'])
+        grand_ti = grand_to = grand_tc = grand_tca = 0
+        total_agents = 0
+        for agent, data in results:
+            agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+            if not agent_models:
+                continue
+            total_agents += 1
+            ti = to = tc = tca = 0
+            for pm in agent_models:
+                inp = int(pm.get('input', 0))
+                out = int(pm.get('output', 0))
+                cache = int(pm.get('cache', 0))
+                calls = int(pm.get('calls', 0))
+                model = pm.get('model', 'unknown')
+                w.writerow([agent.display_name(), model, inp, out, cache, calls, inp + out, inp + out + cache])
+                ti += inp; to += out; tc += cache; tca += calls
+            w.writerow([f'{agent.display_name()} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+            grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
+        if total_agents > 1:
+            gtt = grand_ti + grand_to
+            w.writerow(['全部总计', '', grand_ti, grand_to, grand_tc, grand_tca, gtt, gtt + grand_tc])
+
+
+def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_months):
+    """单 Agent 年度 CSV，按月拆分列。"""
+    import csv
+    all_models = sorted({m for d in monthly_data.values() for m in d})
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        headers = ['Agent', 'Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
+        w.writerow(headers)
+        for model in all_models:
+            for metric in _METRIC_ORDER:
+                row = [agent_display if metric == 'input' else '', model if metric == 'input' else '', _METRIC_LABELS[metric]]
+                tot = 0
+                for m_label in all_months:
+                    md = monthly_data[m_label].get(model, {})
+                    if metric == 'total':
+                        v = md.get('input', 0) + md.get('output', 0)
+                    elif metric == 'total_with_cache':
+                        v = md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                    else:
+                        v = md.get(metric, 0)
+                    tot += v
+                    row.append(int(v))
+                row.append(int(tot))
+                w.writerow(row)
+        # 合计行
+        for metric in _METRIC_ORDER:
+            row = ['合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+            gt_all = 0
+            for m_label in all_months:
+                ct = 0
+                for model in all_models:
+                    md = monthly_data[m_label].get(model, {})
+                    if metric == 'total':
+                        ct += md.get('input', 0) + md.get('output', 0)
+                    elif metric == 'total_with_cache':
+                        ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                    else:
+                        ct += md.get(metric, 0)
+                gt_all += ct
+                row.append(int(ct))
+            row.append(int(gt_all))
+            w.writerow(row)
+
+
+def _write_csv_multi_monthly(filepath, agent_order, all_months):
+    """多 Agent 年度 CSV，含每个 Agent 单独合计 + 总合计。"""
+    import csv
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        headers = ['Agent', 'Model', 'Metric'] + [f'{m}月' for m in all_months] + ['合计']
+        w.writerow(headers)
+        for agent_name, agent_display, monthly_data in agent_order:
+            all_models = sorted({m for d in monthly_data.values() for m in d})
+            if not all_models:
+                continue
+            for model in all_models:
+                for metric in _METRIC_ORDER:
+                    row = [agent_display if metric == 'input' else '', model if metric == 'input' else '', _METRIC_LABELS[metric]]
+                    tot = 0
+                    for m_label in all_months:
+                        md = monthly_data[m_label].get(model, {})
+                        if metric == 'total':
+                            v = md.get('input', 0) + md.get('output', 0)
+                        elif metric == 'total_with_cache':
+                            v = md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                        else:
+                            v = md.get(metric, 0)
+                        tot += v
+                        row.append(int(v))
+                    row.append(int(tot))
+                    w.writerow(row)
+            # Agent 合计
+            for metric in _METRIC_ORDER:
+                row = [f'{agent_display} 合计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+                ag_total = 0
+                for m_label in all_months:
+                    ct = 0
+                    for model in all_models:
+                        md = monthly_data[m_label].get(model, {})
+                        if metric == 'total':
+                            ct += md.get('input', 0) + md.get('output', 0)
+                        elif metric == 'total_with_cache':
+                            ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                        else:
+                            ct += md.get(metric, 0)
+                    ag_total += ct
+                    row.append(int(ct))
+                row.append(int(ag_total))
+                w.writerow(row)
+        # 全部总计
+        if len(agent_order) > 1:
+            for metric in _METRIC_ORDER:
+                row = ['全部总计' if metric == 'input' else '', '', _METRIC_LABELS[metric]]
+                gt_all = 0
+                for m_label in all_months:
+                    ct = 0
+                    for ag_name, ag_display, monthly_data in agent_order:
+                        for model in sorted({m for d in monthly_data.values() for m in d}):
+                            md = monthly_data[m_label].get(model, {})
+                            if metric == 'total':
+                                ct += md.get('input', 0) + md.get('output', 0)
+                            elif metric == 'total_with_cache':
+                                ct += md.get('input', 0) + md.get('output', 0) + md.get('cache', 0)
+                            else:
+                                ct += md.get(metric, 0)
+                    gt_all += ct
+                    row.append(int(ct))
+                row.append(int(gt_all))
+                w.writerow(row)
 
 
 def export_interactive(data: AgentData, agent: BaseAgent,
                        from_ts: float = None, to_ts: float = None,
-                       is_year: bool = False):
-    """交互式导出统计。is_year=True 时按月拆分，导出 XLSX/JSON。"""
+                       is_year: bool = False, export_dir: str = None):
+    """交互式导出统计。is_year=True 时按月拆分，导出 XLSX/CSV/JSON。"""
     try:
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
-
-        # 获取今日总调用次数（全局 + 按模型）
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        today_calls = 0
-        today_calls_by_model = {}
-        try:
-            today_data = agent.collect(from_ts=today_start)
-            if today_data.stats:
-                today_calls = today_data.stats.get("api_calls", 0) or 0
-                # Fallback: sum from per_model
-                if today_calls == 0 and today_data.per_model:
-                    today_calls = sum(pm.get("calls", 0) for pm in today_data.per_model)
-            if today_data and today_data.per_model:
-                for pm in today_data.per_model:
-                    m = (pm.get("model", "") or "").strip()
-                    if m:
-                        today_calls_by_model[m] = pm.get("calls", 0)
-        except Exception:
-            today_calls = 0
 
         # ── 显示格式化汇总 ──
         print()
@@ -2484,7 +2759,7 @@ def export_interactive(data: AgentData, agent: BaseAgent,
             print(f"    输入 tokens     {fmt_num(inp):>8}")
             print(f"    输出 tokens     {fmt_num(out):>8}")
             print(f"    缓存 tokens     {fmt_num(cache):>8}")
-            print(f"    调用次数        {calls} 次 (今日: {today_calls_by_model.get(m, 0)} 次)")
+            print(f"    调用次数        {calls} 次")
             print(f"    ─────────────────────────────────────")
             print(f"    总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
 
@@ -2505,32 +2780,41 @@ def export_interactive(data: AgentData, agent: BaseAgent,
             print(f"    总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
         print()
 
-        # Step 1: 输入目录
-        dir_path = os.getcwd()
-        try:
-            while True:
-                dir_input = input("\n请输入导出目录路径 (回车=当前目录, q=取消): ").strip()
-                if not dir_input:
-                    break
-                if dir_input.lower() == "q":
-                    print("已取消导出")
-                    return
-                p = os.path.expanduser(dir_input)
-                if os.path.isdir(p):
-                    dir_path = p
-                    break
-                print(f"⚠️ 目录不存在: {p}, 请重试")
-        except EOFError:
-            pass
+        # Step 1: 输入目录（如果已提供路径则跳过交互）
+        if export_dir:
+            dir_path = os.path.expanduser(export_dir)
+            if not os.path.isdir(dir_path):
+                print(f"⚠️ 目录不存在: {dir_path}，使用当前目录")
+                dir_path = os.getcwd()
+        else:
+            dir_path = os.getcwd()
+            try:
+                while True:
+                    dir_input = input("\n请输入导出目录路径 (回车=当前目录, q=取消): ").strip()
+                    if not dir_input:
+                        break
+                    if dir_input.lower() == "q":
+                        print("已取消导出")
+                        return
+                    p = os.path.expanduser(dir_input)
+                    if os.path.isdir(p):
+                        dir_path = p
+                        break
+                    print(f"⚠️ 目录不存在: {p}, 请重试")
+            except EOFError:
+                pass
 
         # Step 2: 选择格式
         print("\n选择导出格式:")
         print("  [1] XLSX（默认）")
-        print("  [2] JSON")
+        print("  [2] CSV")
+        print("  [3] JSON")
         fmt = "xlsx"
         try:
-            fmt_choice = input("请选择 (1/2, 回车=1): ").strip().lower()
-            if fmt_choice in ("2", "json"):
+            fmt_choice = input("请选择 (1/2/3, 回车=1): ").strip().lower()
+            if fmt_choice in ("2", "csv"):
+                fmt = "csv"
+            elif fmt_choice in ("3", "json"):
                 fmt = "json"
         except EOFError:
             pass
@@ -2552,14 +2836,12 @@ def export_interactive(data: AgentData, agent: BaseAgent,
                 "agent_display": agent.display_name(),
                 "export_date": date_str,
                 "exported_at": now.isoformat(),
-                "today_calls": today_calls,
                 "per_model": [{
                     "model": pm.get("model", "unknown"),
                     "input_tokens": pm.get("input", 0),
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
                     "calls": pm.get("calls", 0),
-                    "today_calls": today_calls_by_model.get(pm.get("model", ""), 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
                     "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
                 } for pm in filtered_models],
@@ -2578,6 +2860,28 @@ def export_interactive(data: AgentData, agent: BaseAgent,
             }
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
+        elif fmt == "csv":
+            if is_year and from_ts is not None and to_ts is not None:
+                months = _split_months(from_ts, to_ts)
+                month_labels = [label for label, _, _ in months]
+                monthly_data = {}
+                total_months = len(months)
+                for idx, (label, m_start, m_end) in enumerate(months, 1):
+                    print(f"  ⏳ 正在收集 {label} 数据 ({idx}/{total_months})...", end="\r", flush=True)
+                    m_data = agent.collect(from_ts=m_start, to_ts=m_end)
+                    monthly_data[label] = {
+                        pm.get("model", "unknown"): {
+                            "input": pm.get("input", 0), "output": pm.get("output", 0),
+                            "cache": pm.get("cache", 0), "calls": pm.get("calls", 0),
+                        }
+                        for pm in (m_data.per_model or []) if not _skip_model(pm)
+                    }
+                print(" " * 40, end="\r")
+                _write_csv_monthly(filepath, agent.name(), agent.display_name(),
+                                   monthly_data, month_labels)
+            else:
+                _write_csv_simple(filepath, agent.name(), agent.display_name(),
+                                  filtered_models)
         else:
             if is_year and from_ts is not None and to_ts is not None:
                 months = _split_months(from_ts, to_ts)
@@ -2599,7 +2903,7 @@ def export_interactive(data: AgentData, agent: BaseAgent,
                                     monthly_data, month_labels)
             else:
                 _write_xlsx_simple(filepath, agent.name(), agent.display_name(),
-                                   filtered_models, today_calls_by_model, date_str)
+                                   filtered_models)
 
         print(f"✅ 已导出到: {filepath}")
     except KeyboardInterrupt:
@@ -2608,39 +2912,19 @@ def export_interactive(data: AgentData, agent: BaseAgent,
 
 
 def export_multi(results: list[tuple[BaseAgent, AgentData]],
-                  is_year: bool = False, from_ts: float = None, to_ts: float = None):
+                  is_year: bool = False, from_ts: float = None, to_ts: float = None,
+                  export_dir: str = None):
     """导出多个 Agent 的统计（合并输出）。is_year=True 时按月拆分。"""
     try:
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
 
-        # 收集每个 Agent 的今日数据
-        agent_data_list = []
-        for agent, data in results:
-            today_calls = 0
-            today_calls_by_model = {}
-            try:
-                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-                today_data = agent.collect(from_ts=today_start)
-                if today_data.stats:
-                    today_calls = today_data.stats.get("api_calls", 0) or 0
-                    if today_calls == 0 and today_data.per_model:
-                        today_calls = sum(pm.get("calls", 0) for pm in today_data.per_model)
-                if today_data and today_data.per_model:
-                    for pm in today_data.per_model:
-                        m = (pm.get("model", "") or "").strip()
-                        if m:
-                            today_calls_by_model[m] = pm.get("calls", 0)
-            except Exception:
-                pass
-            agent_data_list.append((agent, data, today_calls, today_calls_by_model))
-
         # ── 显示格式化汇总 ──
         print()
         print(f"📊 多 Agent 导出 ({date_str})")
         print("═" * 52)
-        grand_ti = grand_to = grand_tc = grand_tca = grand_today = 0
-        for agent, data, today_calls, today_calls_by_model in agent_data_list:
+        grand_ti = grand_to = grand_tc = grand_tca = 0
+        for agent, data in results:
             print(f"\n  🤖 {agent.display_name()}")
             agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
             for pm in agent_models:
@@ -2659,7 +2943,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 print(f"      输入 tokens     {fmt_num(inp):>8}")
                 print(f"      输出 tokens     {fmt_num(out):>8}")
                 print(f"      缓存 tokens     {fmt_num(cache):>8}")
-                print(f"      调用次数        {calls} 次 (今日: {today_calls_by_model.get(m, 0)} 次)")
+                print(f"      调用次数        {calls} 次")
                 print(f"      ─────────────────────────────────────")
                 print(f"      总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
 
@@ -2678,60 +2962,68 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 print(f"      调用次数        {tca} 次")
                 print(f"      ─────────────────────────────────────")
                 print(f"      总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
-                grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca; grand_today += today_calls
+                grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
             else:
                 pm = agent_models[0] if agent_models else {}
                 grand_ti += pm.get("input", 0)
                 grand_to += pm.get("output", 0)
                 grand_tc += pm.get("cache", 0)
                 grand_tca += pm.get("calls", 0)
-                grand_today += today_calls
 
         # 所有 Agent 总计
-        if len(agent_data_list) > 1:
+        if len(results) > 1:
             gtt = grand_ti + grand_to
             print(f"\n  {'═' * 42}")
             print(f"  全部 Agent 总计")
             print(f"    输入 tokens     {fmt_num(grand_ti):>8}")
             print(f"    输出 tokens     {fmt_num(grand_to):>8}")
             print(f"    缓存 tokens     {fmt_num(grand_tc):>8}")
-            print(f"    调用次数        {grand_tca} 次 (今日: {grand_today} 次)")
+            print(f"    调用次数        {grand_tca} 次")
             print(f"    ─────────────────────────────────────")
             print(f"    总计/+缓存     {fmt_num(gtt)}/{fmt_num(gtt + grand_tc)}")
 
         # Step 1: 输入目录
-        dir_path = os.getcwd()
-        try:
-            while True:
-                dir_input = input("\n请输入导出目录路径 (回车=当前目录, q=取消): ").strip()
-                if not dir_input:
-                    break
-                if dir_input.lower() == "q":
-                    print("已取消导出")
-                    return
-                p = os.path.expanduser(dir_input)
-                if os.path.isdir(p):
-                    dir_path = p
-                    break
-                print(f"⚠️ 目录不存在: {p}, 请重试")
-        except EOFError:
-            pass
+        if export_dir:
+            dir_path = os.path.expanduser(export_dir)
+            if not os.path.isdir(dir_path):
+                print(f"⚠️ 目录不存在: {dir_path}，使用当前目录")
+                dir_path = os.getcwd()
+        else:
+            dir_path = os.getcwd()
+            try:
+                while True:
+                    dir_input = input("\n请输入导出目录路径 (回车=当前目录, q=取消): ").strip()
+                    if not dir_input:
+                        break
+                    if dir_input.lower() == "q":
+                        print("已取消导出")
+                        return
+                    p = os.path.expanduser(dir_input)
+                    if os.path.isdir(p):
+                        dir_path = p
+                        break
+                    print(f"⚠️ 目录不存在: {p}, 请重试")
+            except EOFError:
+                pass
 
         # Step 2: 选择格式
         fmt = "xlsx"
         try:
             print("\n选择导出格式:")
             print("  [1] XLSX（默认）")
-            print("  [2] JSON")
-            fmt_choice = input("请选择 (1/2, 回车=1): ").strip().lower()
-            if fmt_choice in ("2", "json"):
+            print("  [2] CSV")
+            print("  [3] JSON")
+            fmt_choice = input("请选择 (1/2/3, 回车=1): ").strip().lower()
+            if fmt_choice in ("2", "csv"):
+                fmt = "csv"
+            elif fmt_choice in ("3", "json"):
                 fmt = "json"
         except EOFError:
             pass
 
         # Step 3: 写文件
         timestamp = now.strftime("%Y%m%d_%H%M%S")
-        agent_names = "+".join(agent.name() for agent, _, _, _ in agent_data_list)
+        agent_names = "+".join(agent.name() for agent, _ in results)
         if is_year:
             filename = f"token-stats_{agent_names}_yearly_{timestamp}.{fmt}"
         else:
@@ -2740,7 +3032,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
 
         if fmt == "json":
             agents_json = []
-            for agent, data, today_calls, today_calls_by_model in agent_data_list:
+            for agent, data in results:
                 agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
                 per_model = [{
                     "model": pm.get("model", "unknown"),
@@ -2748,14 +3040,12 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
                     "calls": pm.get("calls", 0),
-                    "today_calls": today_calls_by_model.get(pm.get("model", ""), 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
                     "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
                 } for pm in agent_models]
                 entry = {
                     "agent": agent.name(),
                     "agent_display": agent.display_name(),
-                    "today_calls": today_calls,
                     "per_model": per_model,
                 }
                 if agent_models and len(agent_models) > 1:
@@ -2776,13 +3066,12 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 "exported_at": now.isoformat(),
                 "agents": agents_json,
             }
-            if len(agent_data_list) > 1:
+            if len(results) > 1:
                 export_data["grand_total"] = {
                     "total_input_tokens": grand_ti,
                     "total_output_tokens": grand_to,
                     "total_cache_tokens": grand_tc,
                     "total_calls": grand_tca,
-                    "today_calls": grand_today,
                     "total_tokens": grand_ti + grand_to,
                     "total_with_cache": grand_ti + grand_to + grand_tc,
                 }
@@ -2790,12 +3079,40 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
             print(f"  {filepath}")
             print(f"多 Agent 数据已合并导出")
+        elif fmt == "csv":
+            if is_year and from_ts is not None and to_ts is not None:
+                months = _split_months(from_ts, to_ts)
+                month_labels = [label for label, _, _ in months]
+                agent_order = []
+                for agent, data in results:
+                    agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
+                    if not agent_models:
+                        continue
+                    monthly_data = {}
+                    total_months = len(months)
+                    for idx, (label, m_start, m_end) in enumerate(months, 1):
+                        print(f"  ⏳ 正在收集 {agent.display_name()} {label} 数据 ({idx}/{total_months})...", end="\r", flush=True)
+                        m_data = agent.collect(from_ts=m_start, to_ts=m_end)
+                        monthly_data[label] = {
+                            pm.get("model", "unknown"): {
+                                "input": pm.get("input", 0), "output": pm.get("output", 0),
+                                "cache": pm.get("cache", 0), "calls": pm.get("calls", 0),
+                            }
+                            for pm in (m_data.per_model or []) if not _skip_model(pm)
+                        }
+                    print(" " * 50, end="\r")
+                    agent_order.append((agent.name(), agent.display_name(), monthly_data))
+                _write_csv_multi_monthly(filepath, agent_order, month_labels)
+                print(f"  {filepath}")
+                print(f"多 Agent 数据已合并导出")
+            else:
+                _write_csv_multi_simple(filepath, results)
         else:
             if is_year and from_ts is not None and to_ts is not None:
                 months = _split_months(from_ts, to_ts)
                 month_labels = [label for label, _, _ in months]
                 agent_order = []
-                for agent, data, today_calls, today_calls_by_model in agent_data_list:
+                for agent, data in results:
                     agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
                     if not agent_models:
                         continue
@@ -2817,46 +3134,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 print(f"  {filepath}")
                 print(f"多 Agent 数据已合并导出")
             else:
-                # 单 Sheet 合并所有 Agent
-                wb = _XLSXWriter()
-                col_widths = {'A': 18, 'B': 22}
-                for i in range(3, 10):
-                    col_widths[wb._col_letter(i)] = 16
-                wb.add_sheet('多Agent统计', col_widths=col_widths)
-                headers = ['Agent', '模型', '输入', '输出', '缓存', '调用', '今日调用', '总计', '总计(含缓存)']
-                wb.add_row('多Agent统计', [(h, HDR_STYLE) for h in headers])
-                grand_ti = grand_to = grand_tc = grand_tca = grand_tday = 0
-                for agent, data, today_calls, today_calls_by_model in agent_data_list:
-                    agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
-                    if not agent_models:
-                        continue
-                    ti = to = tc = tca = 0
-                    for pm in agent_models:
-                        inp = pm.get('input', 0)
-                        out = pm.get('output', 0)
-                        cache = pm.get('cache', 0)
-                        calls = pm.get('calls', 0)
-                        model = pm.get('model', 'unknown')
-                        tc_model = today_calls_by_model.get(model, 0)
-                        wb.add_row('多Agent统计', [
-                            agent.display_name(), model, int(inp), int(out), int(cache),
-                            int(calls), tc_model, int(inp + out), int(inp + out + cache)])
-                        ti += inp; to += out; tc += cache; tca += calls
-                    if len(agent_models) > 1:
-                        wb.add_row('多Agent统计', [
-                            ('合计', TOT_STYLE), ('', TOT_STYLE), (int(ti), TOT_STYLE),
-                            (int(to), TOT_STYLE), (int(tc), TOT_STYLE), (int(tca), TOT_STYLE),
-                            (today_calls, TOT_STYLE), (int(ti + to), TOT_STYLE),
-                            (int(ti + to + tc), TOT_STYLE)])
-                    grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca; grand_tday += today_calls
-                if len(agent_data_list) > 1:
-                    gtt = grand_ti + grand_to
-                    wb.add_row('多Agent统计', [
-                        ('全部总计', TOT_STYLE), ('', TOT_STYLE), (int(grand_ti), TOT_STYLE),
-                        (int(grand_to), TOT_STYLE), (int(grand_tc), TOT_STYLE),
-                        (int(grand_tca), TOT_STYLE), (grand_tday, TOT_STYLE),
-                        (int(gtt), TOT_STYLE), (int(gtt + grand_tc), TOT_STYLE)])
-                wb.save(filepath)
+                _write_xlsx_multi_simple(filepath, results)
                 print(f"  {filepath}")
                 print(f"多 Agent 数据已合并导出")
     except KeyboardInterrupt:
@@ -3322,6 +3600,9 @@ def main():
     elif args.year:
         from_ts, to_ts = parse_time_label("this-year")
 
+    # 导出目录：-e /path 时直接使用，否则 None（函数内会交互式询问）
+    export_dir = args.export if isinstance(args.export, str) else None
+
     # ── Helper: collect agent data ──
     def _collect_agent_data(agents_list):
         results = []
@@ -3351,7 +3632,8 @@ def main():
         if args.export:
             results = _collect_agent_data(agents)
             if results:
-                export_multi(results, is_year=args.year, from_ts=from_ts, to_ts=to_ts)
+                export_multi(results, is_year=args.year, from_ts=from_ts, to_ts=to_ts,
+                             export_dir=export_dir)
         else:
             show_all(from_ts=from_ts, to_ts=to_ts)
         return
@@ -3383,7 +3665,8 @@ def main():
                 return
             results = _collect_agent_data(agents)
             if args.export:
-                export_multi(results, is_year=args.year, from_ts=from_ts, to_ts=to_ts)
+                export_multi(results, is_year=args.year, from_ts=from_ts, to_ts=to_ts,
+                             export_dir=export_dir)
             else:
                 for agent, data in results:
                     print(f"\n{'─'*50}")
@@ -3434,7 +3717,8 @@ def main():
 
     # ── --export (导出) ──
     if args.export:
-        export_interactive(data, agent, from_ts=from_ts, to_ts=to_ts, is_year=args.year)
+        export_interactive(data, agent, from_ts=from_ts, to_ts=to_ts,
+                            is_year=args.year, export_dir=export_dir)
 
     # --detail 在下一步也可能有用，但当前 collect() 已含 per_model 详情
     # detail 主要用于 watch/collect 输出内容更丰富，当前 collect 实现已包含

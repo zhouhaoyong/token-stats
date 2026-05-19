@@ -122,7 +122,7 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.3.8
+# 输出: token-stats v2.4.1
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
@@ -167,10 +167,57 @@ token-stats --version
 | `-y` | `--yesterday` | 昨日统计 |
 | `-m` | `--month` | 本月统计 |
 | `-w` | `--watch` | 实时监控（默认 5 秒刷新） |
-| `-e` | `--export` | 导出为 XLSX/JSON（交互式选择） |
+| `-e` | `--export` | 导出为 XLSX/CSV/JSON（交互式选择） |
 | `-v` | `--version` | 显示版本号 |
 | `-l` | `--list-backends` | 列出本机已安装的 Agent |
 | `-a` | `--agent` | 指定 Agent（必选，除非交互式菜单） |
+
+### 常见场景
+
+**查看今天所有 Agent 的 token 消耗：**
+```bash
+token-stats --all -t
+```
+
+**查看本月用量汇总：**
+```bash
+token-stats --all -m
+```
+
+**实时盯着 token 消耗跳动：**
+```bash
+token-stats -a hermes -w
+```
+
+**导出本月数据存档分析（交互式选择 XLSX/CSV/JSON）：**
+```bash
+token-stats --all -m -e
+```
+
+**导出年度数据（自动按月拆分列）：**
+```bash
+token-stats --all --year -e
+```
+
+**对比本周 vs 上周的用量变化：**
+```bash
+token-stats -a hermes --compare --a this-week --b last-week
+```
+
+**对比本月 vs 上月的用量变化：**
+```bash
+token-stats -a hermes --compare --a this-month --b last-month
+```
+
+**同时查看多个 Agent 的指定时间段：**
+```bash
+token-stats -a hermes,claude-code -m
+```
+
+**查看本机装了哪些 AI 助手：**
+```bash
+token-stats -l
+```
 
 ### 交互式菜单
 
@@ -206,21 +253,33 @@ token-stats --all
 token-stats -a hermes
 ```
 
-今日 / 昨日统计：
+今日统计：
 ```bash
 token-stats -a hermes -t
+```
+
+昨日统计：
+```bash
 token-stats -a hermes -y
 ```
 
-本周（周一起至今）/ 最近 7 天：
+本周（周一起至今）：
 ```bash
 token-stats -a hermes --week
+```
+
+最近 7 天：
+```bash
 token-stats -a hermes --last-7d
 ```
 
-本月（1 日至今）/ 本年（1 月 1 日至今）：
+本月（1 日至今）：
 ```bash
 token-stats -a hermes -m
+```
+
+本年（1 月 1 日至今）：
+```bash
 token-stats -a hermes --year
 ```
 
@@ -275,15 +334,23 @@ token-stats -a claude-code -w 2
 token-stats -a hermes --compare --a today --b yesterday
 ```
 
-本周 vs 上周 / 本月 vs 上月：
+本周 vs 上周：
 ```bash
 token-stats -a hermes --compare --a this-week --b last-week
+```
+
+本月 vs 上月：
+```bash
 token-stats -a hermes --compare --a this-month --b last-month
 ```
 
-今年 vs 去年 / 两个自定义日期：
+今年 vs 去年：
 ```bash
 token-stats -a hermes --compare --a this-year --b last-year
+```
+
+两个自定义日期对比：
+```bash
 token-stats -a hermes --compare --a 2026-01-01 --b 2026-01-15
 ```
 
@@ -297,7 +364,7 @@ token-stats -a hermes --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01
 
 ### 数据导出
 
-交互式选择目录和格式 [1] XLSX / [2] JSON。带 `--year` 时自动按月拆分（1~12 月分列 + 总计行）。
+交互式选择目录和格式：`[1] XLSX` / `[2] CSV` / `[3] JSON`。带 `--year` 时自动按月拆分（1~12 月分列 + 合计行）。
 
 导出当前快照：
 ```bash
@@ -315,6 +382,11 @@ token-stats -a hermes --year -e       # 本年（按月拆分）
 ```bash
 token-stats --all -t -e               # 所有 Agent 今日
 token-stats --all --year -e           # 所有 Agent 年度按月拆分
+```
+
+直接指定导出目录（跳过交互式目录选择）：
+```bash
+token-stats -a hermes -t -e ~/Desktop # 导出今日统计到桌面
 ```
 
 ### 各 Agent 的数据怎么看
@@ -367,55 +439,6 @@ Agent 跑在 WSL2 中时，`token-stats` 在 Windows 侧自动检测并读取数
 | **零一万物 / Yi** | `yi-large`, `yi-lightning` | 16K~32K |
 
 前缀匹配支持: `claude-opus-4-7-20250219` → 200K, `gpt-4.1-preview` → 1M, `deepseek-v4-0324` → 1M。
-
----
-
-## 常见场景
-
-**今天用了多少 token？** — 查看所有 Agent 的今日消耗汇总
-```bash
-token-stats --all -t
-```
-
-**本月用量汇总** — 查看所有 Agent 本月消耗
-```bash
-token-stats --all -m
-```
-
-**实时盯着消耗** — 边用 Agent 边看 token 跳动
-```bash
-token-stats -a hermes -w
-```
-
-**导出本月数据** — 导出为 XLSX 方便存档分析
-```bash
-token-stats --all -m -e
-```
-
-**导出年度数据** — 自动按月拆分，Excel 中 1~12 月分列
-```bash
-token-stats --all --year -e
-```
-
-**本周 vs 上周** — 对比两周的用量变化
-```bash
-token-stats -a hermes --compare --a this-week --b last-week
-```
-
-**本月 vs 上月** — 对比两个月的用量变化
-```bash
-token-stats -a hermes --compare --a this-month --b last-month
-```
-
-**多 Agent 指定时间段** — 同时查看多个 Agent 的本月数据
-```bash
-token-stats -a hermes,claude-code -m
-```
-
-**查看本机装了哪些 Agent** — 确认可统计的 AI 助手
-```bash
-token-stats -l
-```
 
 ---
 
