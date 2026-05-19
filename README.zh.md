@@ -185,6 +185,18 @@ clawhub update agent-usage-stats
 ```bash
 token-stats --all -t
 ```
+输出示例：
+```
+📊 本机 Agent 统计汇总
+══════════════════════════════════════════════════
+✅ Hermes
+📊 Hermes
+  deepseek-v4-flash | 入 83.5K | 出 8.92K | 缓 969.22K | 总计/+缓存 92.42K/969.22K | 调用 29 次
+  ...
+══════════════════════════════════════════════════
+  全部 Agent 总计
+  入 1.2M | 出 150K | 缓 2.3M | 总计/+缓存 1.35M/2.3M | 调用 500 次
+```
 
 **查看本月用量汇总：**
 ```bash
@@ -196,27 +208,17 @@ token-stats --all -m
 token-stats -a claude-code -w
 ```
 
-**导出本月数据存档分析（交互式选择 XLSX/CSV/JSON）：**
-```bash
-token-stats --all -m -e
-```
-
-**导出年度数据（自动按月拆分列）：**
-```bash
-token-stats --all --year -e
-```
-
-**对比本周 vs 上周的用量变化：**
+**本周 vs 上周完整对比（入/出/缓/总计/调用 全维度）：**
 ```bash
 token-stats -a claude-code --compare --a this-week --b last-week
 ```
 
-**对比本月 vs 上月的用量变化：**
+**本月 vs 上月对比：**
 ```bash
 token-stats -a claude-code --compare --a this-month --b last-month
 ```
 
-**同时查看多个 Agent 的指定时间段：**
+**同时查看多个 Agent：**
 ```bash
 token-stats -a hermes,claude-code -m
 ```
