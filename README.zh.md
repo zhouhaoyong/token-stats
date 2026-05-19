@@ -203,9 +203,32 @@ token-stats --all -t
 token-stats --all -m
 ```
 
+**查看今日 token 消耗：**
+```bash
+token-stats -a claude-code -t
+```
+输出示例：
+```
+📊 Claude Code
+  deepseek-v4-flash | 入 191.65K | 出 999     | 缓 219.9K  | 总计/+缓存 192.65K/219.9K | 调用 16 次
+  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/119.45M  | 调用 624 次
+  合计              | 入 3.21M   | 出 324.29K | 缓 119.67M | 总计/+缓存 3.54M/119.67M  | 调用 640 次
+```
+
 **实时盯着 token 消耗跳动：**
 ```bash
 token-stats -a claude-code -w
+```
+输出示例：
+```
+📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
+
+初始状态:
+  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
+  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
+
+── [10:30:00] +1.2K tokens +3 调用 ──
+  deepseek-v4-pro | +1K入/4.9M | +200出/1.19M | +1.2K缓/451.87M | +3调用
 ```
 
 **本周 vs 上周完整对比（入/出/缓/总计/调用 全维度）：**
@@ -222,10 +245,38 @@ token-stats -a claude-code --compare --a this-month --b last-month
 ```bash
 token-stats -a hermes,claude-code -m
 ```
+输出示例：
+```
+──────────────────────────────────────────────────
+  Hermes
+──────────────────────────────────────────────────
+📊 Hermes
+  deepseek-v4-flash | 入 2.03M | 出 819.69K | 缓 223.53M | 总计/+缓存 2.85M/223.53M | 调用 2075 次
+
+──────────────────────────────────────────────────
+  Claude Code
+──────────────────────────────────────────────────
+📊 Claude Code
+  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
+  deepseek-v4-pro   | 入 4.92M | 出 1.21M  | 缓 462.77M | 总计/+缓存 6.13M/462.77M | 调用 2387 次
+  合计              | 入 7.06M | 出 1.29M  | 缓 471.14M | 总计/+缓存 8.34M/471.14M | 调用 2741 次
+
+══════════════════════════════════════════════════
+  全部 Agent 总计
+  入 7.14M | 出 1.3M | 缓 472.11M | 总计/+缓存 8.43M/472.11M | 调用 2773 次
+```
 
 **查看本机装了哪些 AI 助手：**
 ```bash
 token-stats -l
+```
+输出示例：
+```
+本机已安装的 AI 助手：
+  ✅ Hermes
+  ✅ Claude Code
+  ✅ CodeX
+  ❌ OpenClaw
 ```
 
 ### 交互式菜单
@@ -241,16 +292,26 @@ token-stats
 ```bash
 token-stats -a claude-code
 ```
+输出示例：
+```
+📊 Claude Code
+  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
+  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
+  合计              | 入 6.93M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.2M/460.24M | 调用 2702 次
+```
 
 同时查看多个 Agent（逗号分隔）：
 ```bash
 token-stats -a hermes,claude-code
 ```
+（输出示例见上方「常见场景」→「同时查看多个 Agent」）
 
 查看本机所有 Agent 的统计数据：
 ```bash
 token-stats --all
 ```
+
+（输出示例见下方）
 
 输出示例：
 ```
