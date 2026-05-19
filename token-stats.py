@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.4.6"
+VERSION = "2.4.7"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -919,8 +919,10 @@ class BaseAgent(ABC):
         print()
 
         # ── 监控循环（先采集再 sleep，保证间隔准确）──
+        tick_count = 0
         while not stop_event.is_set():
             tick_start = time.monotonic()
+            tick_count += 1
             try:
                 data = self.collect()
             except Exception as e:
@@ -1184,6 +1186,15 @@ class BaseAgent(ABC):
                 print("  ╌" * 30)
         else:
             print("  监控期间无数据")
+
+        duration = time.time() - watch_start
+        if duration < 60:
+            dur_str = f"{duration:.0f} 秒"
+        elif duration < 3600:
+            dur_str = f"{duration / 60:.0f} 分 {duration % 60:.0f} 秒"
+        else:
+            dur_str = f"{duration / 3600:.0f} 时 {(duration % 3600) / 60:.0f} 分"
+        print(f"  监控时长: {dur_str} | 采集 {tick_count} 轮")
         print("👋 监控已停止")
 
 
