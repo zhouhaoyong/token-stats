@@ -2559,7 +2559,6 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
                 rows_data.append((vals, 'data', agent_name, agent_display, model))
         # 多模型时展示 Agent 合计
         if len(all_models) > 1:
-            rows_data.append(([('', 0)] * (4 + month_count), 'separator', agent_name, agent_display, None))
             for metric in _METRIC_ORDER:
                 vals = [
                     ('' if metric != 'input' else f'{agent_display} 合计', TOT_STYLE),
