@@ -166,110 +166,162 @@ clawhub update agent-usage-stats
 
 ## 用法
 
-`-a` 支持 `hermes` / `claude-code` / `codex` / `openclaw`，逗号分隔可查多个。
+### 一分钟速览
 
-| 短参数 | 长参数 | 说明 |
+| 你想做什么 | 命令 | 适用范围 |
+|-----------|------|---------|
+| 看看今天用了多少 token | `token-stats --all -t` | **所有 Agent** |
+| 看看这个月用了多少 | `token-stats --all -m` | **所有 Agent** |
+| 只看 Claude Code 的数据 | `token-stats -a claude-code` | **单个 Agent** |
+| 边聊边看消耗跳动 | `token-stats -a claude-code -w` | **单个 Agent** |
+| 对比这周和上周 | `token-stats -a claude-code --compare --a this-week --b last-week` | **单个 Agent** |
+| 导出到 Excel | `token-stats -a claude-code -m -e` | **单个 / 所有 Agent** |
+| 弹出菜单自己选 | `token-stats` | 交互式选择 |
+
+### 常用参数
+
+| 短参数 | 长参数 | 干什么用的 |
 |:---:|---|---|
-| `-t` | `--today` | 今日统计 |
-| `-y` | `--year` | 本年统计 |
-| `-m` | `--month` | 本月统计 |
-| `-w` | `--watch` | 实时监控（默认 5 秒刷新） |
-| `-e` | `--export` | 导出为 XLSX/CSV/JSON（交互式选择） |
-| `-v` | `--version` | 显示版本号 |
-| `-l` | `--list-backends` | 列出本机已安装的 Agent |
-| `-a` | `--agent` | 指定 Agent（必选，除非交互式菜单） |
+| `-a` | `--agent` | 指定要看哪个 Agent：`hermes` / `claude-code` / `codex` / `openclaw`。多个用逗号隔开 |
+| `-t` | `--today` | 只看今天的数据 |
+| `-m` | `--month` | 看本月（1 号到今天）的数据 |
+| `-y` | `--year` | 看今年（1 月 1 号到今天）的数据 |
+| `-w` | `--watch` | 实时监控，每 5 秒刷新一次，Ctrl+C 停止 |
+| `-e` | `--export` | 导出成 Excel / CSV / JSON 文件 |
+| `-v` | `--version` | 查看当前版本号 |
+| `-l` | `--list-backends` | 看看电脑上装了哪些 AI 助手 |
+| `--all` | | 一次性查看**所有** Agent 的统计 |
 
-### 常见场景
+> 💡 短参数可以组合。比如 `-a claude-code -t -e` 表示"只看 Claude Code，今天的数据，导出"。
 
-**查看今天所有 Agent 的 token 消耗：**
+---
+
+### 一、我想看某一个 Agent 的数据
+
+这里以 Claude Code 为例。把 `claude-code` 换成你用的 Agent 就行（`hermes` / `codex` / `openclaw`）。
+
+**直接看全部历史（不限时间段）：**
+
 ```bash
-token-stats --all -t
-```
-输出示例：
-```
-📊 本机 Agent 统计汇总
-══════════════════════════════════════════════════
-✅ Hermes
-📊 Hermes
-  deepseek-v4-flash | 入 83.5K | 出 8.92K | 缓 969.22K | 总计/+缓存 92.42K/969.22K | 调用 29 次
-  ...
-══════════════════════════════════════════════════
-  全部 Agent 总计
-  入 1.2M | 出 150K | 缓 2.3M | 总计/+缓存 1.35M/2.3M | 调用 500 次
+token-stats -a claude-code
 ```
 
-**查看本月用量汇总：**
-```bash
-token-stats --all -m
-```
+**只看今天的：**
 
-**查看今日 token 消耗：**
 ```bash
 token-stats -a claude-code -t
 ```
-输出示例：
+
+**看昨天的：**
+
+```bash
+token-stats -a claude-code --yesterday
+```
+
+**看本月的（1 号到今天）：**
+
+```bash
+token-stats -a claude-code -m
+```
+
+**看今年的（1 月 1 号到今天）：**
+
+```bash
+token-stats -a claude-code --year
+```
+
+**看本周的（周一到今天）：**
+
+```bash
+token-stats -a claude-code --week
+```
+
+**看最近 7 天的：**
+
+```bash
+token-stats -a claude-code --last-7d
+```
+
+**自己指定日期范围：**
+
+```bash
+# 从 1 月 1 号到 5 月 18 号
+token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
+```
+
+输出长这样：
+
 ```
 📊 Claude Code
-  deepseek-v4-flash | 入 191.65K | 出 999     | 缓 219.9K  | 总计/+缓存 192.65K/219.9K | 调用 16 次
-  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/119.45M  | 调用 624 次
-  合计              | 入 3.21M   | 出 324.29K | 缓 119.67M | 总计/+缓存 3.54M/119.67M  | 调用 640 次
+  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/10.46M | 调用 349 次
+  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/457.96M | 调用 2348 次
+  合计              | 入 6.93M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.2M/468.44M | 调用 2702 次
+  ────────────────────────────────────
+  子代理: 17 次 | 会话: 20 个 | 项目: 4 个
 ```
 
-**实时盯着 token 消耗跳动：**
+---
+
+### 二、我想同时看多个 Agent 的数据
+
+**指定要看哪几个（逗号分隔）：**
+
 ```bash
-token-stats -a claude-code -w
-```
-输出示例：
-```
-📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
-
-初始状态:
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-
-── [10:30:00] +1.2K tokens +3 调用 ──
-  deepseek-v4-pro | +1K入/4.9M | +200出/1.19M | +1.2K缓/451.87M | +3调用
-```
-
-**本周 vs 上周完整对比（入/出/缓/总计/调用 全维度）：**
-```bash
-token-stats -a claude-code --compare --a this-week --b last-week
-```
-**本月 vs 上月对比：**
-```bash
-token-stats -a claude-code --compare --a this-month --b last-month
-```
-
-**同时查看多个 Agent：**
-```bash
+# 同时看 Hermes 和 Claude Code 本月的数据
 token-stats -a hermes,claude-code -m
 ```
-输出示例：
-```
-──────────────────────────────────────────────────
-  Hermes
-──────────────────────────────────────────────────
-📊 Hermes
-  deepseek-v4-flash | 入 2.03M | 出 819.69K | 缓 223.53M | 总计/+缓存 2.85M/223.53M | 调用 2075 次
 
-──────────────────────────────────────────────────
-  Claude Code
-──────────────────────────────────────────────────
+**一次性看电脑上所有 Agent 的数据：**
+
+```bash
+# 全部历史（不限时间段）
+token-stats --all
+
+# 所有 Agent 今天的数据
+token-stats --all -t
+
+# 所有 Agent 本月的数据
+token-stats --all -m
+
+# 所有 Agent 今年的数据
+token-stats --all --year
+```
+
+输出长这样：
+
+```
+📊 本机 Agent 统计汇总
+══════════════════════════════════════════════════
+
+✅ Hermes
+📊 Hermes
+  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8%) | 入 83.5K | 出 8.92K | 缓 969.22K | 总计/+缓存 92.42K/1.06M | 调用 29 次
+
+✅ Claude Code
 📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.92M | 出 1.21M  | 缓 462.77M | 总计/+缓存 6.13M/462.77M | 调用 2387 次
-  合计              | 入 7.06M | 出 1.29M  | 缓 471.14M | 总计/+缓存 8.34M/471.14M | 调用 2741 次
+  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/10.46M | 调用 349 次
+  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/457.96M | 调用 2348 次
+  合计              | 入 7.03M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.3M/468.54M | 调用 2702 次
 
 ══════════════════════════════════════════════════
   全部 Agent 总计
-  入 7.14M | 出 1.3M | 缓 472.11M | 总计/+缓存 8.43M/472.11M | 调用 2773 次
+  入 7.12M | 出 1.28M | 缓 461.21M | 总计/+缓存 8.4M/469.61M | 调用 2734 次
 ```
 
-**查看本机装了哪些 AI 助手：**
+---
+
+### 三、我想看看电脑上装了哪些 AI 助手
+
 ```bash
+# 短参数
 token-stats -l
+
+# 长参数
+token-stats --list-backends
 ```
-输出示例：
+
+输出长这样：
+
 ```
 本机已安装的 AI 助手：
   ✅ Hermes
@@ -278,290 +330,248 @@ token-stats -l
   ❌ OpenClaw
 ```
 
-### 交互式菜单
+> ✅ = 检测到了，可以查。❌ = 没装或没数据。
 
-无参数直接运行，弹出菜单选择目标 Agent。适合不确定要看哪个 Agent 时使用。
+---
 
-弹出菜单，交互式选择 Agent：
-```bash
-token-stats
-```
+### 四、我想对比两个时间段
 
-跳过菜单，直接查看某个 Agent 的全部历史：
-```bash
-token-stats -a claude-code
-```
-输出示例：
-```
-📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-  合计              | 入 6.93M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.2M/460.24M | 调用 2702 次
-```
+会并排显示两个时间段的 入/出/缓/总计/总计(含缓存)/调用，带差值列，不同模型之间有 `·` 分隔线。
 
-同时查看多个 Agent（逗号分隔）：
-```bash
-token-stats -a hermes,claude-code
-```
-（输出示例见上方「常见场景」→「同时查看多个 Agent」）
+**今天和昨天比：**
 
-查看本机所有 Agent 的统计数据：
-```bash
-token-stats --all
-```
-
-（输出示例见下方）
-
-输出示例：
-```
-📊 本机 Agent 统计汇总
-══════════════════════════════════════════════════
-
-✅ Hermes
-📊 Hermes
-  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8% ✅) | 入 83.5K | 出 8.92K | 缓 969.22K | 总计/+缓存 92.42K/969.22K | 调用 29 次
-
-✅ Claude Code
-📊 Claude Code
-  Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131    | 缓 0       | 总计/+缓存 23.04K/0      | 调用 1 次
-  deepseek-v4-flash                     | 入 2.02M  | 出 77.48K | 缓 8.36M   | 总计/+缓存 2.1M/8.36M    | 调用 349 次
-  deepseek-v4-pro                       | 入 4.9M   | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-  合计                                  | 入 7.03M  | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.3M/460.24M  | 调用 2702 次
-
-✅ CodeX
-📊 CodeX
-  deepseek-v4-pro | 4 轮会话
-
-══════════════════════════════════════════════════
-  全部 Agent 总计
-  入 7.12M | 出 1.28M | 缓 461.21M | 总计/+缓存 8.4M/461.21M | 调用 2734 次
-```
-
-
-### 快照与时间段
-
-按指定时间段筛选统计数据，支持快捷参数和自定义日期范围。
-
-全部历史快照（默认）：
-```bash
-token-stats -a claude-code
-```
-
-今日统计：
-```bash
-token-stats -a claude-code -t
-```
-
-昨日统计：
-```bash
-token-stats -a claude-code --yesterday
-```
-
-本周（周一起至今）：
-```bash
-token-stats -a claude-code --week
-```
-
-最近 7 天：
-```bash
-token-stats -a claude-code --last-7d
-```
-
-本月（1 日至今）：
-```bash
-token-stats -a claude-code -m
-```
-
-本年（1 月 1 日至今）：
-```bash
-token-stats -a claude-code --year
-```
-
-自定义日期范围：
-```bash
-token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
-```
-
-
-输出示例（快照）：
-```
-📊 Claude Code
-  Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131    | 缓 0       | 总计/+缓存 23.04K/0      | 调用 1 次
-  deepseek-v4-flash                     | 入 2.02M  | 出 77.48K | 缓 8.36M   | 总计/+缓存 2.1M/8.36M    | 调用 349 次
-  deepseek-v4-pro                       | 入 4.9M   | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-  gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K  | 缓 0       | 总计/+缓存 90.26K/0      | 调用 4 次
-  合计                                  | 入 7.03M  | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.3M/460.24M  | 调用 2702 次
-  ────────────────────────────────────
-  子代理: 17 次 | 会话: 20 个 | 项目: 4 个
-```
-
-输出示例（时间段）：
-```
-📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.91M | 出 1.19M  | 缓 452.69M | 总计/+缓存 6.1M/452.69M | 调用 2351 次
-  合计              | 入 6.93M | 出 1.27M  | 缓 461.05M | 总计/+缓存 8.2M/461.05M | 调用 2700 次
-```
-
-
-### 实时监控
-
-边用 Agent 边看 token 消耗，随会话实时刷新。
-
-默认 5 秒刷新，查看实时消耗：
-```bash
-token-stats -a claude-code -w
-```
-
-自定义刷新间隔（秒）：
-```bash
-token-stats -a claude-code -w 2
-```
-
-输出示例（有增量时）：
-```
-📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
-
-初始状态:
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-
-── [10:30:00] +1.2K tokens +3 调用 ──
-  deepseek-v4-pro | +1K入/4.9M | +200出/1.19M | +1.2K缓/451.87M | +3调用
-  ╌╌╌╌╌ 📅 今日 ╌╌╌╌╌
-  deepseek-v4-flash | 入 191.65K | 出 999 | 缓 219.9K | 总计/+缓存 192.65K/219.9K | 调用 16
-  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/119.45M | 调用 624
-
-── [10:30:05] 无新活动 ──
-```
-
-无数据时等待：
-```
-📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
-
-初始状态:
-  (暂无数据，等待会话开始...)
-
-── [10:30:00] 无新活动 ──
-```
-
-Ctrl+C 停止后汇总（含增量 + 最终总量）：
-```
-^C
-📊 本次监控汇总
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  本次增量:
-  deepseek-v4-flash | +1.2K入 | +200出 | +2.15M缓 | +3调用
-  deepseek-v4-pro   | +15K入  | +5K出  | +3.5M缓  | +8调用
-  ────────────────────────────────────
-  今日合计: +16.2K tokens | +11 调用
-
-  最终状态:
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.91M | 出 1.19M | 缓 452.69M | 总计/+缓存 6.1M/452.69M | 调用 2351 次
-  合计              | 入 6.93M | 出 1.27M | 缓 461.05M | 总计/+缓存 8.2M/461.05M | 调用 2700 次
-  ────────────────────────────────────
-  子代理: 17 次 | 会话: 20 个 | 项目: 4 个
-  监控时长: 5 分 30 秒 | 采集 66 轮
-```
-
-
-### 时段对比
-
-两个时间段并排比较，带差值列。
-
-今天 vs 昨天：
 ```bash
 token-stats -a claude-code --compare --a today --b yesterday
 ```
 
-本周 vs 上周：
+**这周和上周比：**
+
 ```bash
 token-stats -a claude-code --compare --a this-week --b last-week
 ```
 
-本月 vs 上月：
+**这个月和上个月比：**
+
 ```bash
 token-stats -a claude-code --compare --a this-month --b last-month
 ```
 
-今年 vs 去年：
+**今年和去年比：**
+
 ```bash
 token-stats -a claude-code --compare --a this-year --b last-year
 ```
 
-两个自定义日期对比：
-```bash
-token-stats -a claude-code --compare --a 2026-01-01 --b 2026-01-15
-```
+**两个自定义日期比：**
 
-两段日期范围对比：
 ```bash
+# 两个具体的某一天
+token-stats -a claude-code --compare --a 2026-01-01 --b 2026-01-15
+
+# 两个日期范围（用 ~ 连接）
 token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
 ```
 
-输出示例（本周 vs 上周对比）：
+支持的标签：`today` / `yesterday` / `this-week` / `last-week` / `this-month` / `last-month` / `this-year` / `last-year` / `YYYY-MM-DD` / `YYYY-MM-DD~YYYY-MM-DD`
+
+输出长这样：
+
 ```
 📊 对比: 2026-05-18~2026-05-20 vs 2026-05-11~2026-05-17  [Claude Code]
 =================================================================================================
-  模型                                  | 指标         | 2026-05-18~2026-05-20 | 2026-05-11~2026-05-17 | 变化
+  模型              | 指标         | 2026-05-18~2026-05-20 | 2026-05-11~2026-05-17 | 变化
 ─────────────────────────────────────────────────────────────────────────────────────────────────
-  Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入           | 0                     | 22.91K               | +22.91K
-                                        | 出           | 0                     | 131                  | +131
-                                        | 总计         | 0                     | 23.04K               | +23.04K
-                                        | 调用         | 0                     | 1                    | +1
+  deepseek-v4-flash | 入           | 5.4M                  | 8.09M                 | +2.69M
+                    | 出           | 166.37K               | 267.71K               | +101.34K
+                    | 缓           | 14.09M                | 40.14M                | +26.05M
+                    | 总计         | 5.57M                 | 8.36M                 | +2.79M
+                    | 总计(含缓存) | 19.66M                | 48.5M                 | +28.84M
+                    | 调用         | 482                   | 1.19K                 | +704
   ································································································
-  deepseek-v4-flash                     | 入           | 511.35K               | 1.51M                | +996.34K
-                                        | 出           | 19.19K                | 58.29K               | +39.09K
-                                        | 缓           | 819.97K               | 7.54M                | +6.72M
-                                        | 总计         | 530.55K               | 1.57M                | +1.04M
-                                        | 总计(含缓存) | 1.35M                 | 9.11M                | +7.76M
-                                        | 调用         | 40                    | 309                  | +269
+  deepseek-v4-pro   | 入           | 4.43M                 | 6.89M                 | +2.46M
+                    | 出           | 2.23M                 | 3.1M                  | +868.87K
+                    | 缓           | 890.06M               | 1883.5M               | +993.43M
+                    | 总计         | 6.66M                 | 9.99M                 | +3.33M
+                    | 总计(含缓存) | 896.72M               | 1893.48M              | +996.76M
+                    | 调用         | 4.28K                 | 6.82K                 | +2.54K
   ································································································
-  deepseek-v4-pro                       | 入           | 3.48M                 | 1.43M                | -2.05M
-                                        | 出           | 375.99K               | 816.37K              | +440.38K
-                                        | 缓           | 113.21M               | 340.03M              | +226.83M
-                                        | 总计         | 3.86M                 | 2.24M                | -1.61M
-                                        | 调用         | 640                   | 1.71K                | +1.07K
-  ································································································
-  合计                                  | 入           | 3.99M                 | 3.05M                | -943.26K
-                                        | 出           | 395.18K               | 875.86K              | +480.68K
-                                        | 缓           | 114.03M               | 347.58M              | +233.55M
-                                        | 总计         | 4.39M                 | 3.92M                | -462.57K
-                                        | 调用         | 680                   | 2.03K                | +1.35K
+  合计              | 入           | 41.99M                | 14.98M                | -27.01M
+                    | 出           | 2.48M                 | 3.37M                 | +887.19K
+                    | 缓           | 904.15M               | 1923.64M              | +1019.48M
+                    | 总计         | 44.47M                | 18.34M                | -26.13M
+                    | 总计(含缓存) | 948.62M               | 1941.98M              | +993.36M
+                    | 调用         | 5.53K                 | 8K                    | +2.47K
 ─────────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
+---
 
-支持对比标签：`today`、`yesterday`、`this-week`、`last-week`、`this-month`、`last-month`、`this-year`、`last-year`、`YYYY-MM-DD`、`YYYY-MM-DD~YYYY-MM-DD`
+### 五、我想实时监控 token 消耗
 
+边用 Agent 边盯着，每几秒刷新一次，看到数字在跳。Ctrl+C 停止后会显示本次监控的汇总。
 
-### 数据导出
+**默认 5 秒刷新一次：**
 
-交互式选择目录和格式：`[1] XLSX` / `[2] CSV` / `[3] JSON`。带 `--year` 时自动按月拆分（1~12 月分列 + 合计行）。
-
-导出当前快照：
 ```bash
+token-stats -a claude-code -w
+```
+
+**自定义刷新间隔（比如 2 秒一次）：**
+
+```bash
+token-stats -a claude-code -w 2
+```
+
+输出长这样：
+
+```
+📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
+
+初始状态:
+  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/10.46M | 调用 349 次
+  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/457.96M | 调用 2348 次
+
+── [10:30:00] +1.2K tokens +3 调用 ──
+  deepseek-v4-pro | +1K入/4.9M | +200出/1.19M | +1.2K缓/451.87M | +3调用
+  ╌╌╌╌╌ 📅 今日 ╌╌╌╌╌
+  deepseek-v4-flash | 入 191.65K | 出 999 | 缓 219.9K | 总计/+缓存 192.65K/412.55K | 调用 16
+  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/122.79M | 调用 624
+
+── [10:30:05] 无新活动 ──
+
+^C
+📊 本次监控汇总
+  监控时长: 5 分 30 秒 | 采集 66 轮
+```
+
+> ⚠️ watch 模式只能看**一个** Agent，不支持 `--all` 或逗号多选。
+
+---
+
+### 六、我想导出数据到文件
+
+支持三种格式：XLSX（Excel）、CSV、JSON。年度导出会自动按月分列。
+
+**导出某一个 Agent 的数据：**
+
+```bash
+# 导出 Claude Code 全部历史（会弹出格式选择和目录选择）
 token-stats -a claude-code -e
+
+# 导出 Claude Code 今天的数据
+token-stats -a claude-code -t -e
+
+# 导出 Claude Code 本月的数据
+token-stats -a claude-code -m -e
+
+# 导出 Claude Code 今年的数据（自动按月拆分，每月一列）
+token-stats -a claude-code --year -e
+
+# 直接指定导出目录，跳过目录选择（会弹出格式选择）
+token-stats -a claude-code -m -e ~/Desktop
 ```
 
-导出指定时间段：
+**导出所有 Agent 的数据：**
+
 ```bash
-token-stats -a claude-code -t -e           # 今日
-token-stats -a claude-code -m -e           # 本月
-token-stats -a claude-code --year -e       # 本年（按月拆分）
+# 所有 Agent 本月的数据
+token-stats --all -m -e
+
+# 所有 Agent 今年的数据（按月拆分，一张表包含所有 Agent）
+token-stats --all --year -e
 ```
 
-导出所有 Agent：
-```bash
-token-stats --all -t -e               # 所有 Agent 今日
-token-stats --all --year -e           # 所有 Agent 年度按月拆分
+**选择导出格式：**
+
+运行后会提示你选：
+```
+选择导出格式:
+  [1] XLSX（默认）
+  [2] CSV
+  [3] JSON
+请选择 (1/2/3, 回车=1):
 ```
 
-直接指定导出目录（跳过交互式目录选择）：
+直接回车就选 XLSX。也可以用管道提前选好：
+
 ```bash
-token-stats -a claude-code -t -e ~/Desktop # 导出今日统计到桌面
+# 选 XLSX（回车=1）
+echo 1 | token-stats -a claude-code -m -e ~/Desktop
+
+# 选 CSV
+echo 2 | token-stats -a claude-code -m -e ~/Desktop
+
+# 选 JSON
+echo 3 | token-stats -a claude-code -m -e ~/Desktop
 ```
+
+---
+
+### 七、我不想记参数，弹出菜单自己选
+
+什么都不带直接运行，会弹出菜单让你选要看哪个 Agent。
+
+```bash
+token-stats
+```
+
+```
+🔍 选择你要查看的 AI 助手：
+────────────────────────────────────────
+  [1] Hermes
+  [2] Claude Code
+  [3] CodeX
+  [a] 所有
+  [q] 退出
+────────────────────────────────────────
+请选择：
+```
+
+输入数字就能看对应的 Agent。输入 `a` 看所有。
+
+---
+
+---
+
+### 八、工具自身的维护
+
+**查看帮助（所有命令说明）：**
+
+```bash
+token-stats --help
+```
+
+**查看当前版本号：**
+
+```bash
+token-stats -v
+# 或
+token-stats --version
+```
+
+**把 token-stats 更新到最新版：**
+
+```bash
+token-stats update
+```
+
+如果更新后版本号没变，用强制重装：
+
+```bash
+clawhub install agent-usage-stats --force
+```
+
+**卸载 token-stats：**
+
+```bash
+# 第 1 步：清理全局命令 + PATH
+token-stats --uninstall
+
+# 第 2 步：移除技能文件
+clawhub uninstall agent-usage-stats
+```
+
+---
 
 ### 各 Agent 的数据怎么看
 

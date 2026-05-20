@@ -143,249 +143,277 @@ token-stats --version
 
 ## Usage
 
-`-a` accepts `hermes` / `claude-code` / `codex` / `openclaw`, comma-separated for multiple.
+### Quick Reference
 
-### Common Scenarios
+| What you want to do | Command | Scope |
+|---------------------|---------|-------|
+| Check today's token usage | `token-stats --all -t` | **All agents** |
+| Check this month's usage | `token-stats --all -m` | **All agents** |
+| View Claude Code only | `token-stats -a claude-code` | **Single agent** |
+| Real-time monitoring | `token-stats -a claude-code -w` | **Single agent** |
+| Compare this week vs last week | `token-stats -a claude-code --compare --a this-week --b last-week` | **Single agent** |
+| Export to Excel | `token-stats -a claude-code -m -e` | **Single / All agents** |
+| Interactive menu | `token-stats` | Interactive |
 
-**Today's token consumption across all agents:**
+### Common Options
+
+| Short | Long | What it does |
+|:---:|---|---|
+| `-a` | `--agent` | Pick which agent: `hermes` / `claude-code` / `codex` / `openclaw`. Use commas for multiple |
+| `-t` | `--today` | Today only |
+| `-m` | `--month` | This month (1st to today) |
+| `-y` | `--year` | This year (Jan 1 to today) |
+| `-w` | `--watch` | Live monitor, refreshes every 5 seconds, Ctrl+C to stop |
+| `-e` | `--export` | Export to XLSX / CSV / JSON file |
+| `-v` | `--version` | Show version number |
+| `-l` | `--list-backends` | List installed AI assistants |
+| `--all` | | View **all** agents at once |
+
+> Short options can be combined. For example, `-a claude-code -t -e` means "Claude Code only, today, export."
+
+---
+
+### 1. View a Single Agent
+
+Replace `claude-code` with your agent (`hermes` / `codex` / `openclaw`).
+
+**All history (no time filter):**
 ```bash
-token-stats --all -t
+token-stats -a claude-code
 ```
 
-**This month's usage:**
-```bash
-token-stats --all -m
-```
-
-**Today's consumption for a single agent:**
+**Today only:**
 ```bash
 token-stats -a claude-code -t
 ```
-Output:
-```
-📊 Claude Code
-  deepseek-v4-flash | 入 191.65K | 出 999     | 缓 219.9K  | 总计/+缓存 192.65K/412.55K | 调用 16 次
-  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/122.79M   | 调用 624 次
-  合计              | 入 3.21M   | 出 324.29K | 缓 119.67M | 总计/+缓存 3.54M/119.67M  | 调用 640 次
+
+**Yesterday:**
+```bash
+token-stats -a claude-code --yesterday
 ```
 
-**Live token tracking:**
+**This month (1st to today):**
+```bash
+token-stats -a claude-code -m
+```
+
+**This year (Jan 1 to today):**
+```bash
+token-stats -a claude-code --year
+```
+
+**This week (Monday to today):**
+```bash
+token-stats -a claude-code --week
+```
+
+**Last 7 days:**
+```bash
+token-stats -a claude-code --last-7d
+```
+
+**Custom date range:**
+```bash
+# From Jan 1 to May 18
+token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
+```
+
+Example output:
+```
+📊 Claude Code
+  deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/10.46M | Calls 349
+  deepseek-v4-pro   | In 4.9M  | Out 1.19M  | Cache 451.87M | Total/+Cache 6.09M/457.96M | Calls 2348
+  Subtotal          | In 6.93M | Out 1.27M  | Cache 460.24M | Total/+Cache 8.2M/468.44M | Calls 2702
+  ────────────────────────────────────
+  Sub-agents: 17 | Sessions: 20 | Projects: 4
+```
+
+---
+
+### 2. View Multiple Agents
+
+**Pick specific agents (comma-separated):**
+```bash
+# Hermes and Claude Code, this month
+token-stats -a hermes,claude-code -m
+```
+
+**All agents on this machine:**
+```bash
+# All history
+token-stats --all
+
+# All agents, today
+token-stats --all -t
+
+# All agents, this month
+token-stats --all -m
+
+# All agents, this year
+token-stats --all --year
+```
+
+---
+
+### 3. List Installed AI Assistants
+```bash
+token-stats -l
+# or
+token-stats --list-backends
+```
+
+Output shows which agents are detected (✅) and which are not (❌).
+
+---
+
+### 4. Compare Two Time Periods
+
+Side-by-side comparison showing input/output/cache/total/total_with_cache/calls for each model, with a delta column.
+
+**Today vs yesterday:**
+```bash
+token-stats -a claude-code --compare --a today --b yesterday
+```
+
+**This week vs last week:**
+```bash
+token-stats -a claude-code --compare --a this-week --b last-week
+```
+
+**This month vs last month:**
+```bash
+token-stats -a claude-code --compare --a this-month --b last-month
+```
+
+**This year vs last year:**
+```bash
+token-stats -a claude-code --compare --a this-year --b last-year
+```
+
+**Two custom dates:**
+```bash
+# Two specific days
+token-stats -a claude-code --compare --a 2026-01-01 --b 2026-01-15
+
+# Two date ranges (connected with ~)
+token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+```
+
+Supported labels: `today` / `yesterday` / `this-week` / `last-week` / `this-month` / `last-month` / `this-year` / `last-year` / `YYYY-MM-DD` / `YYYY-MM-DD~YYYY-MM-DD`
+
+---
+
+### 5. Real-time Monitoring
+
+Watch token usage in real time as you chat with the agent. Press Ctrl+C to stop and see a summary.
+
+**Default 5-second refresh:**
 ```bash
 token-stats -a claude-code -w
 ```
 
-**Weekly comparison (all 6 metrics):**
+**Custom interval (e.g., 2 seconds):**
 ```bash
-token-stats -a claude-code --compare --a this-week --b last-week
+token-stats -a claude-code -w 2
 ```
 
-**Multiple agents at once:**
+> Watch mode only supports a **single** agent.
+
+---
+
+### 6. Export to File
+
+Three formats: XLSX (Excel), CSV, JSON. Yearly exports automatically split by month.
+
+**Export a single agent:**
 ```bash
-token-stats -a hermes,claude-code -m
-```
-Output:
-```
-──────────────────────────────────────────────────
-  Hermes
-──────────────────────────────────────────────────
-📊 Hermes
-  deepseek-v4-flash | 入 2.03M | 出 819.69K | 缓 223.53M | 总计/+缓存 2.85M/223.53M | 调用 2075 次
-──────────────────────────────────────────────────
-  Claude Code
-──────────────────────────────────────────────────
-📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.92M | 出 1.21M  | 缓 462.77M | 总计/+缓存 6.13M/462.77M | 调用 2387 次
-  合计              | 入 7.06M | 出 1.29M  | 缓 471.14M | 总计/+缓存 8.34M/471.14M | 调用 2741 次
-══════════════════════════════════════════════════
-  全部 Agent 总计
-  入 7.14M | 出 1.3M | 缓 472.11M | 总计/+缓存 8.43M/472.11M | 调用 2773 次
+# All history (prompts for format and directory)
+token-stats -a claude-code -e
+
+# Today
+token-stats -a claude-code -t -e
+
+# This month
+token-stats -a claude-code -m -e
+
+# This year (auto-split by month)
+token-stats -a claude-code --year -e
+
+# Specify output directory directly
+token-stats -a claude-code -m -e ~/Desktop
 ```
 
-**List installed agents:**
+**Export all agents:**
 ```bash
-token-stats -l
-```
-Output:
-```
-本机已安装的 AI 助手：
-  ✅ Hermes
-  ✅ Claude Code
-  ✅ CodeX
-  ❌ OpenClaw
+# All agents, this month
+token-stats --all -m -e
+
+# All agents, this year (monthly columns, single sheet)
+token-stats --all --year -e
 ```
 
-### Interactive Menu
-
+**Choosing format non-interactively:**
 ```bash
-token-stats                           # interactive picker
-token-stats -a claude-code            # skip menu, go straight to Claude Code
-token-stats -a hermes,claude-code     # multiple agents
-token-stats --all                     # all agents at once
+# XLSX (press Enter = default)
+echo 1 | token-stats -a claude-code -m -e ~/Desktop
+
+# CSV
+echo 2 | token-stats -a claude-code -m -e ~/Desktop
+
+# JSON
+echo 3 | token-stats -a claude-code -m -e ~/Desktop
 ```
 
-Single agent output:
-```
-📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-  合计              | 入 6.93M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.2M/460.24M | 调用 2702 次
-```
+---
 
-### Snapshot & Time Ranges
+### 7. Interactive Menu
 
+Run without arguments to pick an agent from a menu:
 ```bash
-# Current snapshot (default)
-token-stats -a claude-code
-
-# Quick time ranges
-token-stats -a claude-code --today         # today
-token-stats -a claude-code --yesterday     # yesterday
-token-stats -a claude-code --week          # this week (from Monday)
-token-stats -a claude-code --last-7d       # last 7 days
-token-stats -a claude-code --month         # this month
-token-stats -a claude-code --year          # this year
-
-# Custom range
-token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
+token-stats
 ```
 
-Snapshot output:
-```
-📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-  合计              | 入 6.93M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.2M/460.24M | 调用 2702 次
-```
+---
 
-Time range output:
-```
-📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.91M | 出 1.19M  | 缓 452.69M | 总计/+缓存 6.1M/452.69M | 调用 2351 次
-  合计              | 入 6.93M | 出 1.27M  | 缓 461.05M | 总计/+缓存 8.2M/461.05M | 调用 2700 次
-```
+### 8. Tool Maintenance
 
-### Live Monitor
-
-Watch token consumption in real time while using your agent:
+**Show help (all commands):**
 
 ```bash
-token-stats -a claude-code --watch         # refresh every 5s (default)
-token-stats -a claude-code --watch 2       # refresh every 2s
+token-stats --help
 ```
 
-Output:
-```
-📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
-
-初始状态:
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/8.36M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-
-── [10:30:00] +1.2K tokens +3 调用 ──
-  deepseek-v4-pro | +1K入/4.9M | +200出/1.19M | +1.2K缓/451.87M | +3调用
-```
-
-- Context > 60% → suggests `/compact`; > 90% → warning
-- `Ctrl+C` to stop and see a monitoring summary
-
-Output (with activity):
-```
-📡 实时监控 [Claude Code] — refresh every 5s
-
-Initial state:
-  deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/8.36M | Calls 349
-  deepseek-v4-pro   | In 4.9M  | Out 1.19M  | Cache 451.87M | Total/+Cache 6.09M/451.87M | Calls 2348
-
-── [10:30:00] +1.2K tokens +3 calls ──
-  deepseek-v4-pro | +1K in/4.9M | +200 out/1.19M | +1.2K cache/451.87M | +3 calls
-  ╌╌╌╌╌ 📅 Today ╌╌╌╌╌
-  deepseek-v4-pro | In 3.02M | Out 323.29K | Cache 119.45M | Total/+Cache 3.34M/119.45M | Calls 624
-
-── [10:30:05] no new activity ──
-```
-
-After Ctrl+C stop (with session delta + final totals):
-```
-^C
-📊 Monitoring Summary
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Session delta:
-  deepseek-v4-flash | +1.2K in | +200 out | +2.15M cache | +3 calls
-  deepseek-v4-pro   | +15K in  | +5K out  | +3.5M cache  | +8 calls
-  ────────────────────────────────────
-  Today total: +16.2K tokens | +11 calls
-
-  Final state:
-  deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/8.36M | Calls 349
-  deepseek-v4-pro   | In 4.91M | Out 1.19M | Cache 452.69M | Total/+Cache 6.1M/452.69M | Calls 2351
-  Subtotal           | In 6.93M | Out 1.27M | Cache 461.05M | Total/+Cache 8.2M/461.05M | Calls 2700
-  ────────────────────────────────────
-  Sub-agents: 17 | Sessions: 20 | Projects: 4
-  Duration: 5m 30s | Ticks: 66
-```
-
-### Compare
-
-Side-by-side comparison of two time periods — all 6 metrics per model:
+**Show current version:**
 
 ```bash
-# Quick label comparison
-token-stats -a claude-code --compare --a today --b yesterday
-token-stats -a claude-code --compare --a this-week --b last-week
-token-stats -a claude-code --compare --a this-month --b last-month
-token-stats -a claude-code --compare --a this-year --b last-year
-
-# Custom date comparison
-token-stats -a claude-code --compare --a 2026-01-01 --b 2026-01-15
-
-# Date range comparison
-token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~2026-01-14
+token-stats -v
+# or
+token-stats --version
 ```
 
-Output (this week vs last week):
-```
-📊 对比: 2026-05-18~2026-05-20 vs 2026-05-11~2026-05-17  [Claude Code]
-======================================================================================
-  模型 | 指标   | 2026-05-18~2026-05-20 | 2026-05-11~2026-05-17 |       变化
-──────────────────────────────────────────────────────────────────────────────────────
-  deepseek-v4-flash | 入           | 511.35K | 1.51M   | +996.34K
-                    | 出           | 19.19K  | 58.29K  | +39.09K
-                    | 缓           | 819.97K | 7.54M   | +6.72M
-                    | 总计         | 530.55K | 1.57M   | +1.04M
-                    | 调用         | 40      | 309     | +269
-  deepseek-v4-pro   | 入           | 3.48M   | 1.43M   | -2.05M
-                    | 出           | 375.99K | 816.37K | +440.38K
-                    | 总计         | 3.86M   | 2.24M   | -1.61M
-                    | 调用         | 640     | 1.71K   | +1.07K
-  合计              | 入           | 3.99M   | 3.05M   | -943.26K
-                    | 出           | 395.18K | 875.86K | +480.68K
-                    | 总计         | 4.39M   | 3.92M   | -462.57K
-                    | 调用         | 680     | 2.03K   | +1.35K
-──────────────────────────────────────────────────────────────────────────────────────
-```
-
-Compare labels: `today`, `yesterday`, `this-week`, `last-week`, `this-month`, `last-month`, `this-year`, `last-year`, `YYYY-MM-DD`, `YYYY-MM-DD~YYYY-MM-DD`
-
-### Export
-
-Interactive directory and format picker: `[1] XLSX` / `[2] CSV` / `[3] JSON`:
+**Update to the latest version:**
 
 ```bash
-# Basic export
-token-stats -a claude-code --export
-
-# Export with time range
-token-stats -a claude-code --today --export
-token-stats -a claude-code --month --export
-token-stats -a claude-code --year --export
-
-# All agents export
-token-stats --all --today --export
-token-stats --all --month --export
-token-stats --all --year --export
+token-stats update
 ```
+
+If the version doesn't change after update, force reinstall:
+
+```bash
+clawhub install agent-usage-stats --force
+```
+
+**Uninstall token-stats:**
+
+```bash
+# Step 1: Remove wrapper + PATH
+token-stats --uninstall
+
+# Step 2: Remove skill files
+clawhub uninstall agent-usage-stats
+```
+
+---
 
 ### What each agent shows
 
