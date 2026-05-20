@@ -121,7 +121,7 @@ token-stats --list-backends
 token-stats -a hermes
 # Example output:
 # 📊 Hermes
-#   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0% ✅) | 输入 57.1K | 输出 5.4K | 调用 13 次
+#   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0%) | 入 57.1K | 出 5.4K | 缓 0 | 总计/+缓存 62.4K/62.4K | 调用 13 次
 ```
 
 If all three checks produce output, installation is successful 🎉
@@ -164,8 +164,8 @@ token-stats -a claude-code -t
 Output:
 ```
 📊 Claude Code
-  deepseek-v4-flash | 入 191.65K | 出 999     | 缓 219.9K  | 总计/+缓存 192.65K/219.9K | 调用 16 次
-  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/119.45M  | 调用 624 次
+  deepseek-v4-flash | 入 191.65K | 出 999     | 缓 219.9K  | 总计/+缓存 192.65K/412.55K | 调用 16 次
+  deepseek-v4-pro   | 入 3.02M   | 出 323.29K | 缓 119.45M | 总计/+缓存 3.34M/122.79M   | 调用 624 次
   合计              | 入 3.21M   | 出 324.29K | 缓 119.67M | 总计/+缓存 3.54M/119.67M  | 调用 640 次
 ```
 
