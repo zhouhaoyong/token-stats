@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -3726,10 +3726,12 @@ def main():
     if getattr(args, 'update', False):
         print("⏳ 正在通过 ClawHub 更新 token-stats...")
         import subprocess
+        # 更新到当前脚本所在目录（与 wrapper 指向一致），而非固定 ~/skills/
+        skill_dir = os.path.dirname(os.path.abspath(__file__))
         try:
             result = subprocess.run(
                 ["clawhub", "update", "agent-usage-stats",
-                 "--workdir", os.path.expanduser("~"),
+                 "--workdir", skill_dir,
                  "--no-input"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 timeout=120,
@@ -3738,6 +3740,20 @@ def main():
             if output:
                 print(output)
             if result.returncode == 0:
+                # 刷新 wrapper 脚本，确保指向更新后的文件
+                bin_dir = os.path.join(os.path.expanduser("~"), ".local", "bin")
+                target = os.path.join(bin_dir, "token-stats")
+                if not os.path.exists(target):
+                    target = os.path.join(bin_dir, "token-stats.cmd")
+                if os.path.exists(target):
+                    with open(target, "w", encoding="utf-8") as f:
+                        script_path = os.path.abspath(__file__)
+                        if target.endswith(".cmd"):
+                            f.write(f'@python "{script_path}" %*\n')
+                        else:
+                            f.write("#!/bin/sh\n"
+                                    f'exec python3 "{script_path}" "$@"\n')
+                            os.chmod(target, 0o755)
                 print("✅ 更新完成，请运行 token-stats --version 确认版本")
             else:
                 print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: cd ~ && clawhub update agent-usage-stats")

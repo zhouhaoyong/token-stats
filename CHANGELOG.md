@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.5.1 (2026-05-20)
+
+### 修复
+- **`token-stats update` 路径错误**：`--workdir` 从硬编码 `~` 改为脚本实际所在目录，修复不同安装方式下更新到错误路径导致版本号不变的问题
+- **update 后刷新 wrapper**：`clawhub update` 成功后自动重写 `~/.local/bin/token-stats`，确保 wrapper 指向正确路径
+
 ## v2.5.0 (2026-05-20)
 
 ### 修复
