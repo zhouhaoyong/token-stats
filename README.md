@@ -23,7 +23,7 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 |---------|---------|-------------|
 | **Token stats** — by time range | `token-stats -a hermes --month` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
 | **Live monitor** — context tracking | `token-stats -a hermes --watch` | Per-round delta + cumulative, warns above 90%. macOS / Linux / Windows |
-| **Compare** — side-by-side periods | `--compare --a today --b yesterday` | Any time range, multi-model comparison with diff column |
+| **Compare** — side-by-side periods | `--compare --a yesterday --b today` | Any time range, multi-model comparison with diff column |
 | **Export** — XLSX / JSON | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
 | **Model detect** — proxy API verification | `token-stats -a <name>` | Auto-detects 69 models from 13 providers by actual API response name |
 
@@ -151,7 +151,7 @@ token-stats --version
 | Check this month's usage | `token-stats --all -m` | **All agents** |
 | View Claude Code only | `token-stats -a claude-code` | **Single agent** |
 | Real-time monitoring | `token-stats -a claude-code -w` | **Single agent** |
-| Compare this week vs last week | `token-stats -a claude-code --compare --a this-week --b last-week` | **Single agent** |
+| Compare last week vs this week | `token-stats -a claude-code --compare --a last-week --b this-week` | **Single agent** |
 | Export to Excel | `token-stats -a claude-code -m -e` | **Single / All agents** |
 | Interactive menu | `token-stats` | Interactive |
 
@@ -270,24 +270,24 @@ Output shows which agents are detected (✅) and which are not (❌).
 
 Side-by-side comparison showing input/output/cache/total/total_with_cache/calls for each model, with a delta column.
 
-**Today vs yesterday:**
+**Yesterday vs today:**
 ```bash
-token-stats -a claude-code --compare --a today --b yesterday
+token-stats -a claude-code --compare --a yesterday --b today
 ```
 
-**This week vs last week:**
+**Last week vs this week:**
 ```bash
-token-stats -a claude-code --compare --a this-week --b last-week
+token-stats -a claude-code --compare --a last-week --b this-week
 ```
 
-**This month vs last month:**
+**Last month vs this month:**
 ```bash
-token-stats -a claude-code --compare --a this-month --b last-month
+token-stats -a claude-code --compare --a last-month --b this-month
 ```
 
-**This year vs last year:**
+**Last year vs this year:**
 ```bash
-token-stats -a claude-code --compare --a this-year --b last-year
+token-stats -a claude-code --compare --a last-year --b this-year
 ```
 
 **Two custom dates:**
@@ -490,12 +490,12 @@ token-stats --all --year --export
 
 **This week vs last week**
 ```bash
-token-stats -a hermes --compare --a this-week --b last-week
+token-stats -a hermes --compare --a last-week --b this-week
 ```
 
 **This month vs last month**
 ```bash
-token-stats -a hermes --compare --a this-month --b last-month
+token-stats -a hermes --compare --a last-month --b this-month
 ```
 
 **Watch consumption in real time**

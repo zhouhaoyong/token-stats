@@ -10,7 +10,7 @@
 |------|------|------|
 | **Token 消耗统计** — 指定时间范围 | `token-stats -a claude-code --month` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
 | **实时监控** — 上下文占比追踪 | `token-stats -a claude-code --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
-| **时段对比** — 两个时间段并排比较 | `--compare --a today --b yesterday` | 任意时间段聚合，多模型横向对比，带差值列 |
+| **时段对比** — 两个时间段并排比较 | `--compare --a yesterday --b today` | 任意时间段聚合，多模型横向对比，带差值列 |
 | **数据导出** — XLSX / JSON | `--export` | 多 Agent、多时间段组合，交互式选目录；年度按月拆分 |
 | **模型识别** — 中转站 API 校验 | `token-stats -a <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
 
@@ -174,7 +174,7 @@ clawhub update agent-usage-stats
 | 看看这个月用了多少 | `token-stats --all -m` | **所有 Agent** |
 | 只看 Claude Code 的数据 | `token-stats -a claude-code` | **单个 Agent** |
 | 边聊边看消耗跳动 | `token-stats -a claude-code -w` | **单个 Agent** |
-| 对比这周和上周 | `token-stats -a claude-code --compare --a this-week --b last-week` | **单个 Agent** |
+| 对比上周和这周 | `token-stats -a claude-code --compare --a last-week --b this-week` | **单个 Agent** |
 | 导出到 Excel | `token-stats -a claude-code -m -e` | **单个 / 所有 Agent** |
 | 弹出菜单自己选 | `token-stats` | 交互式选择 |
 
@@ -338,28 +338,28 @@ token-stats --list-backends
 
 会并排显示两个时间段的 入/出/缓/总计/总计(含缓存)/调用，带差值列，不同模型之间有 `·` 分隔线。
 
-**今天和昨天比：**
+**昨天和今天比：**
 
 ```bash
-token-stats -a claude-code --compare --a today --b yesterday
+token-stats -a claude-code --compare --a yesterday --b today
 ```
 
-**这周和上周比：**
+**上周和这周比：**
 
 ```bash
-token-stats -a claude-code --compare --a this-week --b last-week
+token-stats -a claude-code --compare --a last-week --b this-week
 ```
 
-**这个月和上个月比：**
+**上个月和这个月比：**
 
 ```bash
-token-stats -a claude-code --compare --a this-month --b last-month
+token-stats -a claude-code --compare --a last-month --b this-month
 ```
 
-**今年和去年比：**
+**去年和今年比：**
 
 ```bash
-token-stats -a claude-code --compare --a this-year --b last-year
+token-stats -a claude-code --compare --a last-year --b this-year
 ```
 
 **两个自定义日期比：**
@@ -377,30 +377,30 @@ token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~20
 输出长这样：
 
 ```
-📊 对比: 2026-05-18~2026-05-20 vs 2026-05-11~2026-05-17  [Claude Code]
+📊 对比: 2026-05-11~2026-05-17 vs 2026-05-18~2026-05-20  [Claude Code]
 =================================================================================================
-  模型              | 指标         | 2026-05-18~2026-05-20 | 2026-05-11~2026-05-17 | 变化
+  模型              | 指标         | 2026-05-11~2026-05-17 | 2026-05-18~2026-05-20 | 变化
 ─────────────────────────────────────────────────────────────────────────────────────────────────
-  deepseek-v4-flash | 入           | 5.4M                  | 8.09M                 | +2.69M
-                    | 出           | 166.37K               | 267.71K               | +101.34K
-                    | 缓           | 14.09M                | 40.14M                | +26.05M
-                    | 总计         | 5.57M                 | 8.36M                 | +2.79M
-                    | 总计(含缓存) | 19.66M                | 48.5M                 | +28.84M
-                    | 调用         | 482                   | 1.19K                 | +704
+  deepseek-v4-flash | 入           | 8.09M                 | 5.4M                  | -2.69M
+                    | 出           | 267.71K               | 166.37K               | -101.34K
+                    | 缓           | 40.14M                | 14.09M                | -26.05M
+                    | 总计         | 8.36M                 | 5.57M                 | -2.79M
+                    | 总计(含缓存) | 48.5M                 | 19.66M                | -28.84M
+                    | 调用         | 1.19K                 | 482                   | -704
   ································································································
-  deepseek-v4-pro   | 入           | 4.43M                 | 6.89M                 | +2.46M
-                    | 出           | 2.23M                 | 3.1M                  | +868.87K
-                    | 缓           | 890.06M               | 1883.5M               | +993.43M
-                    | 总计         | 6.66M                 | 9.99M                 | +3.33M
-                    | 总计(含缓存) | 896.72M               | 1893.48M              | +996.76M
-                    | 调用         | 4.28K                 | 6.82K                 | +2.54K
+  deepseek-v4-pro   | 入           | 6.89M                 | 4.43M                 | -2.46M
+                    | 出           | 3.1M                  | 2.23M                 | -868.87K
+                    | 缓           | 1883.5M               | 890.06M               | -993.43M
+                    | 总计         | 9.99M                 | 6.66M                 | -3.33M
+                    | 总计(含缓存) | 1893.48M              | 896.72M               | -996.76M
+                    | 调用         | 6.82K                 | 4.28K                 | -2.54K
   ································································································
-  合计              | 入           | 41.99M                | 14.98M                | -27.01M
-                    | 出           | 2.48M                 | 3.37M                 | +887.19K
-                    | 缓           | 904.15M               | 1923.64M              | +1019.48M
-                    | 总计         | 44.47M                | 18.34M                | -26.13M
-                    | 总计(含缓存) | 948.62M               | 1941.98M              | +993.36M
-                    | 调用         | 5.53K                 | 8K                    | +2.47K
+  合计              | 入           | 14.98M                | 41.99M                | +27.01M
+                    | 出           | 3.37M                 | 2.48M                 | -887.19K
+                    | 缓           | 1923.64M              | 904.15M               | -1019.48M
+                    | 总计         | 18.34M                | 44.47M                | +26.13M
+                    | 总计(含缓存) | 1941.98M              | 948.62M               | -993.36M
+                    | 调用         | 8K                    | 5.53K                 | -2.47K
 ─────────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
