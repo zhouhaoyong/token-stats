@@ -1,41 +1,37 @@
 # Changelog
 
-## v2.5.3 (2026-05-20)
+## v2.5.4 (2026-05-20)
 
 ### 修复
-- **Windows WSL2 数据收集极慢**：Hermes/CodeX 数据库位于 WSL UNC 路径时，`sqlite3.connect(timeout=10)` 被 WSL 文件系统桥放大到 ~30 秒。修复后检测 `//wsl.` 前缀直接走 `wsl.exe` 内部查询（174ms），提速 164 倍
-- **CodeX WSL 支持**：新增 `_codex_collect_via_wsl()`，与 Hermes 相同的 WSL 直通机制
-- **通用 WSL 检测**：新增 `_is_wsl_unc()` 工具函数，统一判断 WSL UNC 路径
 
-## v2.5.2 (2026-05-20)
+**数据太慢？**
+- Windows 上如果 AI 助手的数据在 WSL2 里，以前查询要等 30 秒（数据库被 WSL 文件桥卡死），现在不到 1 秒
+- 年度导出以前要"收两次数据"，现在只收一次，选完格式就直接导出
 
-### 修复
-- **跨平台 setup/update/uninstall 健壮性**：
-  - Shell 检测从硬编码（mac→zsh, linux→bash）改为读取 `$SHELL` 环境变量，支持 zsh/bash/fish
-  - Fish shell 使用 `fish_add_path` 而非无效的 `export PATH=`
-  - Windows PATH 注册表操作加入 `os.path.normpath` 标准化 + 大小写不敏感比较
-  - `_remove_from_path_unix` 模式匹配统一，消除重复代码
-  - `token-stats update` 用 `shutil.which` 定位 clawhub（修复 Windows 找不到 clawhub.cmd）
+**表格对不齐？**
+- 对比模式（`--compare`）的表头不再把第一条数据覆盖掉，所有列垂直对齐
+- 不同模型之间加了分隔线，一眼就能区分
 
-## v2.5.1 (2026-05-20)
+**Windows 导出打不开？**
+- Excel 导出的文件以前是空的，因为中文工作表名在 Windows 上不兼容，现在改用英文名
 
-### 修复
-- **`token-stats update` 路径错误**：`--workdir` 从硬编码 `~` 改为脚本实际所在目录，修复不同安装方式下更新到错误路径导致版本号不变的问题
-- **update 后刷新 wrapper**：`clawhub update` 成功后自动重写 `~/.local/bin/token-stats`，确保 wrapper 指向正确路径
+**数字算错了？**
+- `总计/+缓存` 那列的第二个数字以前只显示缓存值，现在正确显示"总计+缓存"的总和
 
-## v2.5.0 (2026-05-20)
+**更新不管用？**
+- `token-stats update` 现在有三次保障：先试常规更新 → 不行就强制重装 → 再验证版本号真的变了
+- 无论从哪个渠道安装的（OpenClaw / ClawHub / 手动），都能正确更新
 
-### 修复
-- **Windows XLSX 导出为空**：中文 sheet 名（年度统计/多Agent统计）在 ZIP 内产生 UTF-8 路径，Windows 无法识别。改为 ASCII sheet 名（YearlyStats/MultiAgent）
-- **总计/+缓存 列显示错误**：缓存为 0 时第二值（含缓存总计）错误显示为 0，统一修正为 `total + cache`（17 处代码路径）
-- **对比模式列对齐**：表头覆盖首行数据导致模型名丢失 + 列宽不一致。重写为表头与数据统一 `_align_rows` 对齐
-- **对比模式模型分隔**：不同模型之间增加 `·` 分隔线，提高可读性
-- **`_align_rows` 最后一列**：最后一列现在也参与填充，所有 `|` 分隔符垂直对齐
-- **年度导出重复收集**：月度数据收集前移至格式选择提示之前；单 Agent 年度导出跳过初始全量收集
-- **年度导出 data=None 崩溃**：移除 `export_interactive` 中重复的 `filtered_models` 赋值（覆盖月度汇总结果）
+**安装/卸载的坑：**
+- macOS 用 bash、Linux 用 zsh、或者用 fish shell 的人，PATH 不会被加错配置文件了
+- Windows 上卸载后 PATH 不会残留（大小写、斜杠方向都考虑到了）
+- 卸载后多余的空白行不会留在配置文件里
 
-### 变更
-- **导出空行移除**：XLSX/CSV 导出中 Agent 合计行和全部总计行前的空行分隔符已全部移除
+**其他小修：**
+- 导出的表格不再有多余的空行
+- CSV 格式也能正常导出
+
+## v2.4.7 (2026-05-20)
 
 ## v2.4.7 (2026-05-20)
 

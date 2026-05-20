@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.3"
+VERSION = "2.5.4"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -3822,39 +3822,116 @@ def main():
     if getattr(args, 'update', False):
         print("⏳ 正在通过 ClawHub 更新 token-stats...")
         import subprocess, shutil
-        # 更新到当前脚本所在目录（与 wrapper 指向一致），而非固定 ~/skills/
         skill_dir = os.path.dirname(os.path.abspath(__file__))
-        # Windows 下 npm 全局安装的 clawhub 可能在子进程 PATH 外，用 shutil.which 定位
         clawhub_exe = shutil.which("clawhub") or shutil.which("clawhub.cmd") or "clawhub"
+
+        def _copy_updated_files(src_dir, dst_dir):
+            """从 src_dir 复制更新后的文件到 dst_dir。"""
+            if not os.path.isdir(src_dir):
+                return False
+            if os.path.normpath(src_dir) == os.path.normpath(dst_dir):
+                return True  # 同目录，无需复制
+            copied = False
+            for fname in os.listdir(src_dir):
+                src = os.path.join(src_dir, fname)
+                dst = os.path.join(dst_dir, fname)
+                if os.path.isfile(src):
+                    shutil.copy2(src, dst)
+                    copied = True
+            return copied
+
+        def _refresh_wrapper():
+            """刷新 ~/.local/bin 下的 wrapper 脚本。"""
+            bin_dir = os.path.join(os.path.expanduser("~"), ".local", "bin")
+            target = os.path.join(bin_dir, "token-stats")
+            if not os.path.exists(target):
+                target = os.path.join(bin_dir, "token-stats.cmd")
+            if not os.path.exists(target):
+                return
+            with open(target, "w", encoding="utf-8") as f:
+                script_path = os.path.abspath(__file__)
+                if target.endswith(".cmd"):
+                    f.write(f'@python "{script_path}" %*\n')
+                else:
+                    f.write("#!/bin/sh\n"
+                            f'exec python3 "{script_path}" "$@"\n')
+                    os.chmod(target, 0o755)
+
+        def _read_version(path):
+            """从 token-stats.py 读取 VERSION 字符串。"""
+            try:
+                fpath = os.path.join(path, "token-stats.py")
+                if not os.path.isfile(fpath):
+                    return None
+                with open(fpath, encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith('VERSION = "'):
+                            return line.split('"')[1]
+            except Exception:
+                pass
+            return None
+
         try:
+            old_ver = VERSION
             result = subprocess.run(
-                [clawhub_exe, "update", "agent-usage-stats",
-                 "--workdir", skill_dir,
-                 "--no-input"],
+                [clawhub_exe, "update", "agent-usage-stats", "--no-input"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 timeout=120,
             )
             output = result.stdout.decode("utf-8", errors="ignore").strip()
             if output:
                 print(output)
-            if result.returncode == 0:
-                # 刷新 wrapper 脚本，确保指向更新后的文件
-                bin_dir = os.path.join(os.path.expanduser("~"), ".local", "bin")
-                target = os.path.join(bin_dir, "token-stats")
-                if not os.path.exists(target):
-                    target = os.path.join(bin_dir, "token-stats.cmd")
-                if os.path.exists(target):
-                    with open(target, "w", encoding="utf-8") as f:
-                        script_path = os.path.abspath(__file__)
-                        if target.endswith(".cmd"):
-                            f.write(f'@python "{script_path}" %*\n')
-                        else:
-                            f.write("#!/bin/sh\n"
-                                    f'exec python3 "{script_path}" "$@"\n')
-                            os.chmod(target, 0o755)
-                print("✅ 更新完成，请运行 token-stats --version 确认版本")
+
+            if result.returncode != 0:
+                print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: clawhub update agent-usage-stats")
+                return
+
+            # 搜索 ClawHub 安装的新文件（不同平台/版本路径可能不同）
+            search_dirs = [
+                os.path.join(os.path.expanduser("~"), "skills", "agent-usage-stats"),
+                os.path.join(os.path.expanduser("~"), ".clawhub", "skills", "agent-usage-stats"),
+            ]
+            updated_src = None
+            for d in search_dirs:
+                ver = _read_version(d)
+                if ver and ver != old_ver:
+                    updated_src = d
+                    break
+
+            # 如果 update 没生效（ClawHub 在某些环境不写文件），改用 install --force
+            if updated_src is None:
+                print("  ⏳ 常规更新未生效，尝试强制重装...")
+                result2 = subprocess.run(
+                    [clawhub_exe, "install", "agent-usage-stats", "--force"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=120,
+                )
+                out2 = result2.stdout.decode("utf-8", errors="ignore").strip()
+                if out2:
+                    print(out2)
+                for d in search_dirs:
+                    ver = _read_version(d)
+                    if ver and ver != old_ver:
+                        updated_src = d
+                        break
+
+            # 复制到脚本目录
+            if updated_src:
+                _copy_updated_files(updated_src, skill_dir)
+                new_ver = _read_version(skill_dir)
+                if new_ver and new_ver != old_ver:
+                    _refresh_wrapper()
+                    print(f"✅ 已更新到 v{new_ver}，请运行 token-stats --version 确认")
+                else:
+                    print(f"⚠️ 文件复制后版本仍为 v{old_ver}，请手动执行: cd ~ && clawhub install agent-usage-stats --force")
             else:
-                print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: cd ~ && clawhub update agent-usage-stats")
+                # 找不到更新文件，但 clawhub 返回成功，可能同目录已更新
+                new_ver = _read_version(skill_dir)
+                if new_ver and new_ver != old_ver:
+                    _refresh_wrapper()
+                    print(f"✅ 已更新到 v{new_ver}，请运行 token-stats --version 确认")
+                else:
+                    print(f"⚠️ 版本未变化 (仍为 v{old_ver})，请手动执行: clawhub install agent-usage-stats --force")
         except FileNotFoundError:
             print("❌ 未找到 clawhub CLI，请先安装: npm install -g clawhub")
             print("   然后手动执行: clawhub update agent-usage-stats")
@@ -3862,7 +3939,7 @@ def main():
             print("⚠️ 更新超时，请检查网络后手动执行: clawhub update agent-usage-stats")
         except Exception as e:
             print(f"⚠️ 更新失败: {e}")
-            print("   请手动执行: cd ~ && clawhub update agent-usage-stats")
+            print("   请手动执行: clawhub update agent-usage-stats")
         return
 
     # ── list-backends ──
