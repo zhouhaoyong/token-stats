@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.5.3 (2026-05-20)
+
+### 修复
+- **Windows WSL2 数据收集极慢**：Hermes/CodeX 数据库位于 WSL UNC 路径时，`sqlite3.connect(timeout=10)` 被 WSL 文件系统桥放大到 ~30 秒。修复后检测 `//wsl.` 前缀直接走 `wsl.exe` 内部查询（174ms），提速 164 倍
+- **CodeX WSL 支持**：新增 `_codex_collect_via_wsl()`，与 Hermes 相同的 WSL 直通机制
+- **通用 WSL 检测**：新增 `_is_wsl_unc()` 工具函数，统一判断 WSL UNC 路径
+
 ## v2.5.2 (2026-05-20)
 
 ### 修复

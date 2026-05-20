@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.2"
+VERSION = "2.5.3"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -162,6 +162,11 @@ def _resolve_path(relative_path):
     return native
 
 
+def _is_wsl_unc(path: str) -> bool:
+    """检测路径是否为 WSL UNC 路径（如 //wsl.localhost/Distro/...）。"""
+    return path.replace("\\", "/").startswith("//wsl.")
+
+
 def _wsl_unc_to_linux(unc_path):
     """WSL UNC 路径 → (distro, linux_path)。非 WSL 返回 (None, None)。"""
     p = unc_path.replace("\\", "/")
@@ -199,6 +204,37 @@ def _hermes_collect_via_wsl(db_path, from_ts=None, to_ts=None):
         "f'SELECT model,SUM(input_tokens) inp,SUM(output_tokens) out,SUM(cache_read_tokens) cache,'"
         "f'SUM('+ac+') calls,SUM('+tc+') tools,COUNT(*) cnt FROM sessions%s GROUP BY model')];"
         "sc=c.execute('SELECT COUNT(*) FROM sessions%s').fetchone()[0];"
+        "c.close();print(json.dumps({'rows':rows,'sc':sc},default=str))"
+    ) % (linux_path, where, where)
+    try:
+        r = subprocess.run(
+            ["wsl.exe", "-d", distro, "--", "python3", "-c", script],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15,
+        )
+        return json.loads(r.stdout.decode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def _codex_collect_via_wsl(db_path, from_ts=None, to_ts=None):
+    """通过 wsl.exe 在 WSL 内查询 CodeX 数据库。返回 dict 或 None。"""
+    import subprocess
+    distro, linux_path = _wsl_unc_to_linux(db_path)
+    if not distro:
+        return None
+    where = ""
+    if from_ts or to_ts:
+        parts = []
+        if from_ts:
+            parts.append(f"created_at >= {int(from_ts)}")
+        if to_ts:
+            parts.append(f"created_at <= {int(to_ts)}")
+        where = " WHERE " + " AND ".join(parts)
+    script = (
+        "import sqlite3,json;c=sqlite3.connect(r'%s');c.row_factory=sqlite3.Row;"
+        "rows=[dict(r) for r in c.execute("
+        "'SELECT model,model_provider,SUM(tokens_used) tokens,COUNT(*) cnt FROM threads%s GROUP BY model,model_provider')];"
+        "sc=c.execute('SELECT COUNT(*) FROM threads%s').fetchone()[0];"
         "c.close();print(json.dumps({'rows':rows,'sc':sc},default=str))"
     ) % (linux_path, where, where)
     try:
@@ -1290,6 +1326,12 @@ class HermesAgent(BaseAgent):
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         hermes_db = _find_hermes_db()
+        # WSL UNC 路径跳过直连（通过 UNC 打开 SQLite 极慢，timeout 会被放大到 ~30s）
+        if _is_wsl_unc(hermes_db):
+            fb = self._try_wsl_fallback(hermes_db, "database is locked (WSL UNC)", from_ts, to_ts)
+            if fb:
+                return fb
+            # WSL fallback 不可用，回退到直连尝试
         try:
             return self._collect_impl(hermes_db, from_ts, to_ts)
         except Exception as e:
@@ -1659,6 +1701,31 @@ class CodeXAgent(BaseAgent):
             return db != native
         return False
 
+    def _codex_wsl_fallback(self, db, from_ts, to_ts):
+        """WSL UNC 路径：通过 wsl.exe 在 WSL 内查询 CodeX 数据库。"""
+        result = _codex_collect_via_wsl(db, from_ts, to_ts)
+        if not result or not result.get("rows"):
+            return AgentData(
+                name="codex", display_name="CodeX (WSL)",
+                stats={}, raw="CodeX (WSL): 该时间段内无会话记录", per_model=[]
+            )
+        rows = result["rows"]
+        per_model_list = []
+        total_tok = total_cnt = 0
+        for r in rows:
+            model = r.get("model") or r.get("model_provider") or "codex-default"
+            ts = int(r.get("tokens") or 0)
+            cnt = int(r.get("cnt") or 0)
+            per_model_list.append({"model": model, "input": ts, "output": 0, "calls": cnt, "cache": 0})
+            total_tok += ts
+            total_cnt += cnt
+        stats = {
+            "model": ", ".join(sorted({pm["model"] for pm in per_model_list})),
+            "total_tokens": total_tok, "session_count": total_cnt,
+        }
+        raw = _build_aligned_raw("CodeX (WSL)", per_model_list)
+        return AgentData(name="codex", display_name="CodeX", stats=stats, raw=raw, per_model=per_model_list)
+
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         db = _find_codex_db()
         if not db:
@@ -1666,6 +1733,9 @@ class CodeXAgent(BaseAgent):
                 name="codex", display_name="CodeX",
                 stats={}, raw="CodeX: 未检测到数据库文件"
             )
+        # WSL UNC 路径跳过直连
+        if _is_wsl_unc(db):
+            return self._codex_wsl_fallback(db, from_ts, to_ts)
         try:
             conn = sqlite3.connect(db, timeout=5)
             conn.row_factory = sqlite3.Row
