@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.5.2 (2026-05-20)
+
+### 修复
+- **跨平台 setup/update/uninstall 健壮性**：
+  - Shell 检测从硬编码（mac→zsh, linux→bash）改为读取 `$SHELL` 环境变量，支持 zsh/bash/fish
+  - Fish shell 使用 `fish_add_path` 而非无效的 `export PATH=`
+  - Windows PATH 注册表操作加入 `os.path.normpath` 标准化 + 大小写不敏感比较
+  - `_remove_from_path_unix` 模式匹配统一，消除重复代码
+  - `token-stats update` 用 `shutil.which` 定位 clawhub（修复 Windows 找不到 clawhub.cmd）
+
 ## v2.5.1 (2026-05-20)
 
 ### 修复

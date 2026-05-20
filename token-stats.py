@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.1"
+VERSION = "2.5.2"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -3429,10 +3429,29 @@ PATH_MARKER_START = "# >>> token-stats PATH >>>"
 PATH_MARKER_END = "# <<< token-stats PATH <<<"
 
 
+def _detect_rc_file():
+    """根据 $SHELL 检测当前用户的 shell 配置文件。"""
+    shell = os.environ.get("SHELL", "")
+    shell_name = os.path.basename(shell)
+    if shell_name == "zsh":
+        return "~/.zshrc"
+    elif shell_name == "bash":
+        return "~/.bashrc"
+    elif shell_name == "fish":
+        return "~/.config/fish/config.fish"
+    else:
+        # Fallback: 按优先级尝试存在的 rc 文件
+        for rc in ["~/.zshrc", "~/.bashrc", "~/.bash_profile", "~/.profile"]:
+            if os.path.exists(os.path.expanduser(rc)):
+                return rc
+        return "~/.bashrc"
+
+
 def _add_to_path_windows(bin_dir):
     """将目录添加到用户 PATH（注册表），广播变更消息。返回 True/False。"""
     import ctypes
     import winreg
+    bin_dir = os.path.normpath(bin_dir)  # 标准化为 Windows 反斜杠路径
     key = None
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE)
@@ -3440,8 +3459,8 @@ def _add_to_path_windows(bin_dir):
             current, _ = winreg.QueryValueEx(key, "PATH")
         except FileNotFoundError:
             current = ""
-        entries = [e for e in current.split(";") if e]
-        if bin_dir in entries:
+        entries = [os.path.normpath(e) for e in current.split(";") if e]
+        if bin_dir.lower() in (e.lower() for e in entries):  # Windows 大小写不敏感
             return False
         entries.append(bin_dir)
         new_path = ";".join(entries)
@@ -3459,11 +3478,12 @@ def _remove_from_path_windows(bin_dir):
     """从用户 PATH 中移除目录（注册表），广播变更消息。"""
     import ctypes
     import winreg
+    bin_dir = os.path.normpath(bin_dir)  # 标准化为 Windows 反斜杠路径
     key = None
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE)
         current, _ = winreg.QueryValueEx(key, "PATH")
-        entries = [e for e in current.split(";") if e and e != bin_dir]
+        entries = [e for e in current.split(";") if e and os.path.normpath(e).lower() != bin_dir.lower()]
         new_path = ";".join(entries)
         winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ, new_path)
         ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 2, 5000, None)
@@ -3476,9 +3496,13 @@ def _remove_from_path_windows(bin_dir):
 
 
 def _add_to_path_unix(bin_dir, rc_file):
-    """将 export PATH 行（带标记）追加到 shell 配置文件。若已存在则跳过。"""
+    """将 PATH 行（带标记）追加到 shell 配置文件。若已存在则跳过。"""
     rc_path = os.path.expanduser(rc_file)
-    export_line = f'export PATH="$PATH:{bin_dir}"'
+    is_fish = rc_file.endswith(".fish") or "fish" in rc_file
+    if is_fish:
+        export_line = f"fish_add_path {bin_dir}"
+    else:
+        export_line = f'export PATH="$PATH:{bin_dir}"'
     block = f"\n{PATH_MARKER_START}\n{export_line}\n{PATH_MARKER_END}\n"
     try:
         if os.path.exists(rc_path):
@@ -3497,16 +3521,18 @@ def _remove_from_path_unix(bin_dir, rc_file):
     rc_path = os.path.expanduser(rc_file)
     if not os.path.exists(rc_path):
         return False
+    is_fish = rc_file.endswith(".fish") or "fish" in rc_file
+    if is_fish:
+        export_line = f"fish_add_path {bin_dir}"
+    else:
+        export_line = f'export PATH="$PATH:{bin_dir}"'
     try:
         with open(rc_path, "r", encoding="utf-8") as f:
             content = f.read()
-        pattern = f"\n{PATH_MARKER_START}\nexport PATH=\"$PATH:{bin_dir}\"\n{PATH_MARKER_END}\n"
-        if pattern in content:
-            content = content.replace(pattern, "")
-        # also try without leading newline (at file start)
-        pattern2 = f"{PATH_MARKER_START}\nexport PATH=\"$PATH:{bin_dir}\"\n{PATH_MARKER_END}\n"
-        if pattern2 in content:
-            content = content.replace(pattern2, "")
+        for prefix in ("\n", ""):
+            pattern = f"{prefix}{PATH_MARKER_START}\n{export_line}\n{PATH_MARKER_END}\n"
+            if pattern in content:
+                content = content.replace(pattern, "")
         with open(rc_path, "w", encoding="utf-8") as f:
             f.write(content)
         return True
@@ -3644,15 +3670,16 @@ def main():
         if not path_ok:
             if is_win:
                 _add_to_path_windows(bin_dir)
-            elif is_mac:
-                _add_to_path_unix(bin_dir, "~/.zshrc")
             else:
-                _add_to_path_unix(bin_dir, "~/.bashrc")
+                rc = _detect_rc_file()
+                _add_to_path_unix(bin_dir, rc)
         print("\r✅ 已添加到系统 PATH                    ")
 
         # 3. 检查旧 alias（仅 Unix）
         if not is_win:
-            for rc_file in ["~/.zshrc", "~/.bashrc", "~/.bash_profile"]:
+            rc = _detect_rc_file()
+            rc_files = list(dict.fromkeys([rc, "~/.zshrc", "~/.bashrc", "~/.bash_profile"]))
+            for rc_file in rc_files:
                 rc_path = os.path.expanduser(rc_file)
                 if os.path.exists(rc_path):
                     with open(rc_path, encoding="utf-8") as f:
@@ -3705,10 +3732,9 @@ def main():
         print("⏳ 正在清理系统 PATH...", end="", flush=True)
         if is_win:
             _remove_from_path_windows(bin_dir)
-        elif is_mac:
-            _remove_from_path_unix(bin_dir, "~/.zshrc")
         else:
-            _remove_from_path_unix(bin_dir, "~/.bashrc")
+            rc = _detect_rc_file()
+            _remove_from_path_unix(bin_dir, rc)
         print("\r✅ 已清理系统 PATH                    ")
 
         # 3. 清理配置文件
@@ -3725,12 +3751,14 @@ def main():
     # ── update ──
     if getattr(args, 'update', False):
         print("⏳ 正在通过 ClawHub 更新 token-stats...")
-        import subprocess
+        import subprocess, shutil
         # 更新到当前脚本所在目录（与 wrapper 指向一致），而非固定 ~/skills/
         skill_dir = os.path.dirname(os.path.abspath(__file__))
+        # Windows 下 npm 全局安装的 clawhub 可能在子进程 PATH 外，用 shutil.which 定位
+        clawhub_exe = shutil.which("clawhub") or shutil.which("clawhub.cmd") or "clawhub"
         try:
             result = subprocess.run(
-                ["clawhub", "update", "agent-usage-stats",
+                [clawhub_exe, "update", "agent-usage-stats",
                  "--workdir", skill_dir,
                  "--no-input"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
