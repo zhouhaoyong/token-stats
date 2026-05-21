@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.5"
+VERSION = "2.5.6"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -1029,9 +1029,8 @@ class BaseAgent(ABC):
                     summary_parts.append(f"{total_delta_calls} 调用")
                 print(f"── [{ts}] {' '.join(summary_parts)} ──")
 
-                # 增量行
+                # 增量行（仅展示本轮有变化的模型）
                 print("  ╌" * 30)
-                # 先检查是否有任何模型有缓存数据（保证列一致）
                 any_cache_now = any(
                     mv.get("cache", 0) or (mv.get("cache", 0) - bl_models.get(mn, {}).get("cache", 0))
                     for mn, mv in now_models.items()
@@ -1053,35 +1052,30 @@ class BaseAgent(ABC):
                         bl_models[mn] = mv
                         continue
 
-                    cols = [mn]
+                    if not has_delta:
+                        continue
+
                     cache_v = mv.get('cache', 0)
+                    cols = [mn]
                     if self._has_live_context:
                         cw = detect_context(mn)
                         pct = round(total / cw * 100, 1) if cw else 0
                         cols.append(_progress_bar(pct))
                         cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                    if has_delta:
-                        cols.append(f"+{fmt_num(d_in)}入/{fmt_num(mv['input'])}")
-                        cols.append(f"+{fmt_num(d_out)}出/{fmt_num(mv['output'])}")
-                        if any_cache_now:
-                            cols.append(f"+{fmt_num(d_cache)}缓/{fmt_num(cache_v)}")
-                        cols.append(f"+{d_calls}调用")
-                    else:
-                        cols.append(f"入 {fmt_num(mv['input'])}")
-                        cols.append(f"出 {fmt_num(mv['output'])}")
-                        if any_cache_now:
-                            cols.append(f"缓 {fmt_num(cache_v)}")
-                        cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_v)}")
-                        cols.append(f"调用 {mv['calls']}")
+                    cols.append(f"入 +{fmt_num(d_in)}/{fmt_num(mv['input'])}")
+                    cols.append(f"出 +{fmt_num(d_out)}/{fmt_num(mv['output'])}")
+                    if any_cache_now:
+                        cols.append(f"缓 +{fmt_num(d_cache)}/{fmt_num(cache_v)}")
+                    cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_v)}")
+                    cols.append(f"调用 {mv['calls']}")
 
-                    delta_rows.append((cols, has_delta, mn, mv))
+                    delta_rows.append((cols, mn, mv))
 
                 if delta_rows:
                     aligned = _align_rows([r[0] for r in delta_rows])
-                    for (cols, has_delta, mn, mv), aligned_cols in zip(delta_rows, aligned):
+                    for (cols, mn, mv), aligned_cols in zip(delta_rows, aligned):
                         print(f"  {' | '.join(aligned_cols)}")
-                        if has_delta:
-                            bl_models[mn] = mv
+                        bl_models[mn] = mv
                 if idle_models:
                     print(f"  (未使用: {', '.join(idle_models)})")
                 print("  ╌" * 30)
