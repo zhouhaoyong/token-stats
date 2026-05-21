@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.6"
+VERSION = "2.5.7"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -1055,19 +1055,19 @@ class BaseAgent(ABC):
                     if not has_delta:
                         continue
 
-                    cache_v = mv.get('cache', 0)
                     cols = [mn]
                     if self._has_live_context:
                         cw = detect_context(mn)
                         pct = round(total / cw * 100, 1) if cw else 0
                         cols.append(_progress_bar(pct))
                         cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                    cols.append(f"入 +{fmt_num(d_in)}/{fmt_num(mv['input'])}")
-                    cols.append(f"出 +{fmt_num(d_out)}/{fmt_num(mv['output'])}")
+                    cols.append(f"入 +{fmt_num(d_in)}")
+                    cols.append(f"出 +{fmt_num(d_out)}")
                     if any_cache_now:
-                        cols.append(f"缓 +{fmt_num(d_cache)}/{fmt_num(cache_v)}")
-                    cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_v)}")
-                    cols.append(f"调用 {mv['calls']}")
+                        cols.append(f"缓 +{fmt_num(d_cache)}")
+                    d_total = d_in + d_out
+                    cols.append(f"总计/+缓存 +{fmt_num(d_total)}/+{fmt_num(d_total + d_cache)}")
+                    cols.append(f"调用 +{d_calls}")
 
                     delta_rows.append((cols, mn, mv))
 
