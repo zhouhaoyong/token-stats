@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.4"
+VERSION = "2.5.5"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -893,6 +893,7 @@ class BaseAgent(ABC):
         watch_start = time.time()
         # 今日起始时间戳，用于 📅 今日合计查询
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        yesterday_start = None  # 跨天时记录上一个 today_start，用于汇总拆分
         print(f"\n📡 实时监控 [{self.display_name()}] — 每 {interval} 秒刷新 (Ctrl+C 停止)\n")
 
         # ── 首次基线 ──
@@ -1001,6 +1002,20 @@ class BaseAgent(ABC):
                     bl_models[mn] = mv
 
             ts = datetime.now().strftime("%H:%M:%S")
+
+            # 跨天检测：午夜过后自动切换"今日"基准
+            new_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            if new_today_start > today_start:
+                yesterday_start = today_start
+                today_start = new_today_start
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print()
+                print("  " + "═" * 58)
+                print(f"  跨天切换 — 当前时间 {now_str}")
+                print("  新的一天开始，\"今日\"数据已重置")
+                print("  " + "═" * 58)
+                print()
+
             any_delta = bool(changed_models)
             if any_delta:
                 summary_parts = []
@@ -1163,7 +1178,8 @@ class BaseAgent(ABC):
                             f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
                     today_rows.append(cols)
                 if today_rows:
-                    print(f"\n  ╌╌╌╌╌ 📅 今日累计 ╌╌╌╌╌")
+                    today_label = datetime.fromtimestamp(today_start).strftime("%Y-%m-%d")
+                    print(f"\n  ╌╌╌╌╌ 📅 今日累计 ({today_label}) ╌╌╌╌╌")
                     if len(today_models) > 1:
                         sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
                                    f"缓 {fmt_num(tc)}",
@@ -1175,6 +1191,42 @@ class BaseAgent(ABC):
                     print("  ╌" * 30)
             except Exception:
                 pass
+
+            # 📅 昨日累计（仅在跨天时显示）
+            if yesterday_start is not None:
+                try:
+                    yesterday_data = self.collect(from_ts=yesterday_start, to_ts=today_start - 1)
+                    yti = yto = ytc = ytca = 0
+                    yesterday_models = yesterday_data.per_model or []
+                    yesterday_rows = []
+                    for pm in yesterday_models:
+                        m = pm.get("model", "?")
+                        i = pm.get("input", 0) or 0
+                        o = pm.get("output", 0) or 0
+                        c = pm.get("cache", 0) or 0
+                        ca = pm.get("calls", 0) or 0
+                        if i == 0 and o == 0 and ca == 0:
+                            continue
+                        yti += i; yto += o; ytc += c; ytca += ca
+                        t = i + o
+                        cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                                f"缓 {fmt_num(c)}",
+                                f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                        yesterday_rows.append(cols)
+                    if yesterday_rows:
+                        yesterday_label = datetime.fromtimestamp(yesterday_start).strftime("%Y-%m-%d")
+                        print(f"\n  ╌╌╌╌╌ 📅 昨日累计 ({yesterday_label}) ╌╌╌╌╌")
+                        if len(yesterday_rows) > 1:
+                            sum_row = ["昨日合计", f"入 {fmt_num(yti)}", f"出 {fmt_num(yto)}",
+                                       f"缓 {fmt_num(ytc)}",
+                                       f"总计/+缓存 {fmt_num(yti + yto)}/{fmt_num(yti + yto + ytc)}", f"调用 {ytca}"]
+                            yesterday_rows.append(sum_row)
+                        aligned = _align_rows(yesterday_rows)
+                        for row in aligned:
+                            print(f"  {' | '.join(row)}")
+                        print("  ╌" * 30)
+                except Exception:
+                    pass
 
             # 总增量（最新累计 - 初始基线）
             total_d_tok = total_d_cache = total_d_calls = 0
@@ -1228,6 +1280,10 @@ class BaseAgent(ABC):
         else:
             dur_str = f"{duration / 3600:.0f} 时 {(duration % 3600) / 60:.0f} 分"
         print(f"  监控时长: {dur_str} | 采集 {tick_count} 轮")
+        if yesterday_start is not None:
+            yesterday_label = datetime.fromtimestamp(yesterday_start).strftime("%Y-%m-%d")
+            today_label = datetime.fromtimestamp(today_start).strftime("%Y-%m-%d")
+            print(f"  ⚠️ 监控跨越 {yesterday_label} → {today_label}，跨天时\"今日\"数据已重置")
         print("👋 监控已停止")
 
 
