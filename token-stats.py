@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.7"
+VERSION = "2.5.8"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -3515,10 +3515,13 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
                 print(" " * 40, end="\r")
                 if data.stats:
                     any_data = True
-                    grand_ti += data.stats.get("input_tokens", 0) or 0
-                    grand_to += data.stats.get("output_tokens", 0) or 0
-                    grand_tc += data.stats.get("cache_read", 0) or 0
-                    grand_tca += data.stats.get("api_calls", 0) or 0
+                    for pm in (data.per_model or []):
+                        if _skip_model(pm):
+                            continue
+                        grand_ti += pm.get("input", 0) or 0
+                        grand_to += pm.get("output", 0) or 0
+                        grand_tc += pm.get("cache", 0) or 0
+                        grand_tca += pm.get("calls", 0) or 0
                     agent_count += 1
                 print(data.raw)
             except Exception as e:
@@ -4103,10 +4106,15 @@ def main():
                     print(f"{'─'*50}")
                     print(data.raw)
                 if len(results) > 1:
-                    gti = sum(d.stats.get("input_tokens", 0) or 0 for _, d in results)
-                    gto = sum(d.stats.get("output_tokens", 0) or 0 for _, d in results)
-                    gtc = sum(d.stats.get("cache_read", 0) or 0 for _, d in results)
-                    gtca = sum(d.stats.get("api_calls", 0) or 0 for _, d in results)
+                    gti = gto = gtc = gtca = 0
+                    for _, d in results:
+                        for pm in (d.per_model or []):
+                            if _skip_model(pm):
+                                continue
+                            gti += pm.get("input", 0) or 0
+                            gto += pm.get("output", 0) or 0
+                            gtc += pm.get("cache", 0) or 0
+                            gtca += pm.get("calls", 0) or 0
                     gtt = gti + gto
                     print(f"\n{'═'*50}")
                     print("  全部 Agent 总计")

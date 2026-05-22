@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.5.8 (2026-05-22)
+
+### 修复
+
+**`--all` 全部 Agent 总计漏算 CodeX 数据**
+- `show_all()` 和 `-a agent1,agent2` 两条路径的"全部 Agent 总计"都从 `per_model` 汇总（结构统一），不再从 `stats` 字典读（各 Agent key 不一致，导致 CodeX 的 `total_tokens`/`session_count` 无法匹配 `input_tokens`/`output_tokens`，数据被跳过）
+- 导出路径本来就是从 `per_model` 读的，不受影响
+
 ## v2.5.7 (2026-05-21)
 
 ### 优化
