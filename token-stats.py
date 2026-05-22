@@ -4579,7 +4579,9 @@ def main():
                 return
 
             # 搜索 ClawHub 安装的新文件（不同平台/版本路径可能不同）
+            script_dir = os.path.dirname(os.path.abspath(__file__))
             search_dirs = [
+                os.path.join(script_dir, "skills", "agent-usage-stats"),
                 os.path.join(os.path.expanduser("~"), "skills", "agent-usage-stats"),
                 os.path.join(os.path.expanduser("~"), ".clawhub", "skills", "agent-usage-stats"),
             ]
