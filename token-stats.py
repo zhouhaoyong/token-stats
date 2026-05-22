@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.5.8"
+VERSION = "2.6.0"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -345,6 +345,138 @@ def fmt_pct(pct: float) -> str:
         return f"{pct:.1f}% ✅"
 
 
+# ═══════════════════════════════════════════════════
+#  价格与缓存率
+# ═══════════════════════════════════════════════════
+
+_model_prices_cache = None
+
+
+def _load_model_prices() -> dict:
+    """加载 model_prices.toml，失败返回 {}。结果缓存。"""
+    global _model_prices_cache
+    if _model_prices_cache is not None:
+        return _model_prices_cache
+    # 查找配置文件：先找项目根目录，再找脚本所在目录
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_prices.toml"),
+        os.path.join(os.getcwd(), "model_prices.toml"),
+    ]
+    for cp in candidates:
+        if os.path.isfile(cp):
+            try:
+                if sys.version_info >= (3, 11):
+                    import tomllib
+                    with open(cp, "rb") as f:
+                        data = tomllib.load(f)
+                else:
+                    data = {}
+            except Exception:
+                data = {}
+            _model_prices_cache = data
+            return data
+    _model_prices_cache = {}
+    return {}
+
+
+def _get_model_price(model: str) -> dict | None:
+    """获取指定模型的价格配置。先精确匹配，再前缀匹配"""
+    prices = _load_model_prices()
+    if not prices:
+        return None
+    if model in prices:
+        return prices[model]
+    # 前缀匹配：如 deepseek-v4-pro-20250219 → deepseek-v4-pro
+    for key in sorted(prices.keys(), key=lambda k: -len(k)):
+        if model.startswith(key):
+            return prices[key]
+    return None
+
+
+def _calc_cache_rate(inp: int, cache: int) -> float | None:
+    """计算缓存命中率（百分比）。
+    自适应公式：cache > input → cache/(cache+input), 否则 cache/input。
+    返回 None 表示无法计算。"""
+    if cache <= 0 or inp <= 0:
+        return None
+    if cache > inp:
+        return cache / (cache + inp) * 100
+    return cache / inp * 100
+
+
+def _fmt_cache_val(cache: int, inp: int) -> str:
+    """格式化缓存展示，含缓存命中率。eg: 缓 162.18K (85.5%)"""
+    base = f"缓 {fmt_num(cache)}"
+    rate = _calc_cache_rate(inp, cache)
+    if rate is not None:
+        return f"{base} ({min(rate, 99.9):.1f}%)"
+    return base
+
+
+def _calc_cost(inp: int, out: int, cache: int, price: dict) -> float:
+    """计算预估费用。自适应缓存模型：cache>inp 时 inp=cacheMiss，否则 inp 含 cacheHit"""
+    if cache > inp:
+        no_cache = inp
+        cache_tokens = cache
+    else:
+        no_cache = inp - cache
+        cache_tokens = cache
+    return (no_cache * price.get("input_no_cache_price", 0) +
+            cache_tokens * price.get("input_cache_price", 0) +
+            out * price.get("output_price", 0)) / 1_000_000
+
+
+def _fmt_cost(inp: int, out: int, cache: int, price: dict) -> str:
+    """格式化预估费用，统一为人民币"""
+    total = _calc_cost(inp, out, cache, price)
+    currency = price.get("currency", "CNY")
+    if currency == "USD":
+        total *= _USD_TO_CNY
+    return f"≈¥{total:.2f}"
+
+
+def _calc_total_cost(per_model_list: list) -> dict[str, float]:
+    """计算 per_model 列表中所有有价格模型的费用总和。返回 {currency: cost}"""
+    totals: dict[str, float] = {}
+    for pm in (per_model_list or []):
+        pc = _get_model_price(pm.get("model", ""))
+        if pc:
+            inp = pm.get("input", 0) or 0
+            out = pm.get("output", 0) or 0
+            cache = pm.get("cache", 0) or 0
+            cur = pc.get("currency", "CNY")
+            totals[cur] = totals.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)
+    return totals
+
+
+# USD → CNY 汇率
+_USD_TO_CNY = 7.25
+
+
+def _to_cny(cost: float, currency: str) -> float:
+    """将费用统一转为人民币"""
+    return cost * _USD_TO_CNY if currency == "USD" else cost
+
+
+def _fmt_total_cost(totals: dict[str, float]) -> str:
+    """格式化总费用，统一转人民币。eg: ≈¥87.29"""
+    if not totals:
+        return ""
+    # 统一换算为 CNY
+    total_cny = totals.get("CNY", 0.0) + totals.get("USD", 0.0) * _USD_TO_CNY
+    if total_cny <= 0:
+        return ""
+    return f"≈¥{total_cny:.2f}"
+
+
+def _has_any_price(per_model_data: list) -> bool:
+    """检查 per_model 列表中是否至少有一个模型配置了价格"""
+    for pm in (per_model_data or []):
+        mn = pm.get("model", "")
+        if _get_model_price(mn):
+            return True
+    return False
+
 
 def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
     """Format per-model today data. Returns [first_line, ...] for printing.
@@ -368,15 +500,20 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
         tc += c
         tca += ca
 
+    has_price = _has_any_price(filtered)
+
     lines = []
     if len(models) == 1:
         m, i, o, c, ca = models[0]
         t = i + o
         parts = [f"入 {fmt_num_fn(i)}",
                  f"出 {fmt_num_fn(o)}",
-                 f"缓 {fmt_num_fn(c)}",
+                 _fmt_cache_val(c, i),
                  f"总计/+缓存 {fmt_num_fn(t)}/{fmt_num_fn(t + c)}",
                  f"调用 {ca} 次"]
+        if has_price:
+            price_cfg = _get_model_price(m)
+            parts.append(_fmt_cost(i, o, c, price_cfg) if price_cfg else "-")
         lines.append(f"  📅 今日 | {' | '.join(parts)}")
     else:
         rows = []
@@ -385,18 +522,25 @@ def fmt_today_lines(per_model: list, fmt_num_fn) -> list:
             cols = [
                 f"入 {fmt_num_fn(i)}",
                 f"出 {fmt_num_fn(o)}",
-                f"缓 {fmt_num_fn(c)}",
+                _fmt_cache_val(c, i),
                 f"总计/+缓存 {fmt_num_fn(t)}/{fmt_num_fn(t + c)}",
                 f"调用 {ca} 次",
             ]
+            if has_price:
+                price_cfg = _get_model_price(m)
+                cols.append(_fmt_cost(i, o, c, price_cfg) if price_cfg else "-")
             rows.append((m, cols))
         cols_total = [
             f"入 {fmt_num_fn(ti)}",
             f"出 {fmt_num_fn(to)}",
-            f"缓 {fmt_num_fn(tc)}",
+            _fmt_cache_val(tc, ti),
             f"总计/+缓存 {fmt_num_fn(ti + to)}/{fmt_num_fn(ti + to + tc)}",
             f"调用 {tca} 次",
         ]
+        if has_price:
+            total_cost_str = _fmt_total_cost(_calc_total_cost(filtered))
+            if total_cost_str:
+                cols_total.append(f"{total_cost_str} (仅供参考)")
         rows.append(("今日合计", cols_total))
         col_count = len(cols_total)
         col_widths = [0] * (col_count + 1)
@@ -619,8 +763,8 @@ def _split_months(from_ts, to_ts):
 
 
 def _progress_bar(pct: float) -> str:
-    """10 段上下文进度条，带 ANSI 颜色。"""
-    n = min(10, max(0, round(pct / 10)))
+    """10 段上下文进度条，带 ANSI 颜色。累计模式下 pct 可能超过 100%"""
+    n = min(10, max(0, round(min(pct, 100) / 10)))
     bar = "█" * n + "░" * (10 - n)
     # ANSI 颜色：绿(<60%) / 黄(60-90%) / 红(>90%)
     if pct >= 90:
@@ -629,6 +773,8 @@ def _progress_bar(pct: float) -> str:
         color = "\033[33m"  # 黄
     else:
         color = "\033[32m"  # 绿
+    if pct > 100:
+        return f"{color}[{bar}]\033[0m >100%"
     return f"{color}[{bar}]\033[0m {pct}%"
 
 
@@ -757,12 +903,12 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
         parts.append(f"上下文 {fmt_num(total)}/{fmt_num(context_window)} ({fmt_pct(pct)})")
         parts.append(f"入 {fmt_num(inp)}")
         parts.append(f"出 {fmt_num(out)}")
-        parts.append(f"缓 {fmt_num(cache)}")
+        parts.append(_fmt_cache_val(cache, inp))
         parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache)}")
     else:
         parts.append(f"入 {fmt_num(inp)}")
         parts.append(f"出 {fmt_num(out)}")
-        parts.append(f"缓 {fmt_num(cache)}")
+        parts.append(_fmt_cache_val(cache, inp))
         parts.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache)}")
     if calls > 0 and session_count != calls:
         parts.append(f"调用 {calls} 次")
@@ -770,6 +916,10 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
         parts.append(f"{session_count} 轮会话")
     if extra:
         parts.append(extra)
+    # 价格
+    pc = _get_model_price(model_name)
+    if pc:
+        parts.append(_fmt_cost(inp, out, cache, pc))
     if not parts:
         parts.append("无数据")
     return f"  {model_name} | {' | '.join(parts)}"
@@ -785,6 +935,7 @@ def _build_aligned_raw(agent_display: str, per_model_list: list,
 
     rows = []
     ti = to = tc = tca = 0
+    has_price = _has_any_price(per_model_list)
     for pm in per_model_list:
         mn = pm.get("model", "unknown")
         inp = pm.get("input", 0) or 0
@@ -806,10 +957,13 @@ def _build_aligned_raw(agent_display: str, per_model_list: list,
                 cols.append(f"{fmt_num(total)}/-")
         cols.append(f"入 {fmt_num(inp)}")
         cols.append(f"出 {fmt_num(out)}")
-        cols.append(f"缓 {fmt_num(cache)}")
+        cols.append(_fmt_cache_val(cache, inp))
         cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache)}")
         if calls > 0:
             cols.append(f"调用 {calls} 次")
+        if has_price:
+            pc = _get_model_price(mn)
+            cols.append(_fmt_cost(inp, out, cache, pc) if pc else "-")
         rows.append(cols)
 
     # Agent 合计行
@@ -821,9 +975,13 @@ def _build_aligned_raw(agent_display: str, per_model_list: list,
             subtotal_cols.append("")
         subtotal_cols.append(f"入 {fmt_num(ti)}")
         subtotal_cols.append(f"出 {fmt_num(to)}")
-        subtotal_cols.append(f"缓 {fmt_num(tc)}")
+        subtotal_cols.append(_fmt_cache_val(tc, ti))
         subtotal_cols.append(f"总计/+缓存 {fmt_num(total_all)}/{fmt_num(total_all + tc)}")
         subtotal_cols.append(f"调用 {tca} 次")
+        if has_price:
+            total_cost_str = _fmt_total_cost(_calc_total_cost(per_model_list))
+            if total_cost_str:
+                subtotal_cols.append(f"{total_cost_str} (仅供参考)")
         rows.append(subtotal_cols)
 
     aligned = _align_rows(rows)
@@ -927,6 +1085,8 @@ class BaseAgent(ABC):
         print("初始状态:")
         has_data = False
         has_cache = any(mv.get("cache", 0) for mv in bl_models.values())
+        # 检查是否有配置了价格的模型
+        bl_has_price = any(_get_model_price(mn) for mn in bl_models)
         if bl_models:
             init_rows = []
             for mn, mv in bl_models.items():
@@ -940,9 +1100,12 @@ class BaseAgent(ABC):
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                 cols.append(f"入 {fmt_num(mv['input'])}")
                 cols.append(f"出 {fmt_num(mv['output'])}")
-                cols.append(f"缓 {fmt_num(cache_val)}")
+                cols.append(_fmt_cache_val(cache_val, mv['input']))
                 cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_val)}")
                 cols.append(f"调用 {mv['calls']}")
+                if bl_has_price:
+                    pc = _get_model_price(mn)
+                    cols.append(_fmt_cost(mv['input'], mv['output'], cache_val, pc) if pc else "-")
                 init_rows.append(cols)
                 has_data = True
             aligned = _align_rows(init_rows)
@@ -1027,6 +1190,19 @@ class BaseAgent(ABC):
                     summary_parts.append(f"+{total_delta_calls} 调用")
                 elif total_delta_calls < 0:
                     summary_parts.append(f"{total_delta_calls} 调用")
+                # 增量费用
+                delta_cost = 0.0
+                delta_currency = "CNY"
+                for mn, mv in now_models.items():
+                    bl = bl_models.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+                    d_in = mv["input"] - bl["input"]
+                    d_out = mv["output"] - bl["output"]
+                    d_cache = mv.get("cache", 0) - bl.get("cache", 0)
+                    pc = _get_model_price(mn)
+                    if pc and (d_in or d_out or d_cache):
+                        delta_cost += _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                if delta_cost > 0:
+                    summary_parts.append(f"≈¥{delta_cost:.4f}")
                 print(f"── [{ts}] {' '.join(summary_parts)} ──")
 
                 # 增量行（仅展示本轮有变化的模型）
@@ -1035,6 +1211,7 @@ class BaseAgent(ABC):
                     mv.get("cache", 0) or (mv.get("cache", 0) - bl_models.get(mn, {}).get("cache", 0))
                     for mn, mv in now_models.items()
                 )
+                delta_has_price = any(_get_model_price(mn) for mn in now_models)
                 delta_rows = []
                 idle_models = []
                 for mn, mv in now_models.items():
@@ -1064,10 +1241,21 @@ class BaseAgent(ABC):
                     cols.append(f"入 +{fmt_num(d_in)}")
                     cols.append(f"出 +{fmt_num(d_out)}")
                     if any_cache_now:
-                        cols.append(f"缓 +{fmt_num(d_cache)}")
+                        rate = _calc_cache_rate(d_in, d_cache)
+                        if rate is not None:
+                            cols.append(f"缓 +{fmt_num(d_cache)} ({min(rate, 99.9):.1f}%)")
+                        else:
+                            cols.append(f"缓 +{fmt_num(d_cache)}")
                     d_total = d_in + d_out
                     cols.append(f"总计/+缓存 +{fmt_num(d_total)}/+{fmt_num(d_total + d_cache)}")
                     cols.append(f"调用 +{d_calls}")
+                    if delta_has_price:
+                        pc = _get_model_price(mn)
+                        if pc and (d_in or d_out or d_cache):
+                            dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                            cols.append(f"≈¥{dc:.4f}")
+                        else:
+                            cols.append("-")
 
                     delta_rows.append((cols, mn, mv))
 
@@ -1087,7 +1275,7 @@ class BaseAgent(ABC):
                     ti = to = tc = tca = 0
                     today_models = today_data.per_model or []
                     today_rows = []
-                    today_has_cache = False
+                    today_has_price = _has_any_price(today_models)
                     for pm in today_models:
                         m = pm.get("model", "?")
                         i = pm.get("input", 0) or 0
@@ -1099,14 +1287,21 @@ class BaseAgent(ABC):
                         ti += i; to += o; tc += c; tca += ca
                         t = i + o
                         cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
-                                f"缓 {fmt_num(c)}",
+                                _fmt_cache_val(c, i),
                                 f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                        if today_has_price:
+                            pc = _get_model_price(m)
+                            cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
                         today_rows.append(cols)
                     if today_rows:
                         if len(today_models) > 1:
                             sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
-                                       f"缓 {fmt_num(tc)}",
+                                       _fmt_cache_val(tc, ti),
                                        f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(ti + to + tc)}", f"调用 {tca}"]
+                            if today_has_price:
+                                tc_sum_str = _fmt_total_cost(_calc_total_cost(today_models))
+                                if tc_sum_str:
+                                    sum_row.append(f"{tc_sum_str} (仅供参考)")
                             today_rows.append(sum_row)
                         aligned = _align_rows(today_rows)
                         for row in aligned:
@@ -1116,6 +1311,13 @@ class BaseAgent(ABC):
                     pass
             else:
                 print(f"── [{ts}] 无新活动 ──")
+
+            # 每轮无条件更新 baseline，防止因数据竞态导致 delta 累积假 spike
+            for mn, mv in now_models.items():
+                bl_models[mn] = mv
+            for mn in list(bl_models.keys()):
+                if mn not in now_models:
+                    del bl_models[mn]
 
             # 精确间隔补偿
             elapsed = time.monotonic() - tick_start
@@ -1132,6 +1334,7 @@ class BaseAgent(ABC):
         if bl_models:
             print("  最终状态:")
             final_rows = []
+            bl_has_price = any(_get_model_price(mn) for mn in bl_models)
             for mn, mv in sorted(bl_models.items()):
                 total = mv["input"] + mv["output"]
                 cache_v = mv.get("cache", 0)
@@ -1143,9 +1346,12 @@ class BaseAgent(ABC):
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
                 cols.append(f"入 {fmt_num(mv['input'])}")
                 cols.append(f"出 {fmt_num(mv['output'])}")
-                cols.append(f"缓 {fmt_num(cache_v)}")
+                cols.append(_fmt_cache_val(cache_v, mv['input']))
                 cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_v)}")
                 cols.append(f"调用 {mv['calls']}")
+                if bl_has_price:
+                    pc = _get_model_price(mn)
+                    cols.append(_fmt_cost(mv['input'], mv['output'], cache_v, pc) if pc else "-")
                 final_rows.append(cols)
             aligned = _align_rows(final_rows)
             for row in aligned:
@@ -1157,6 +1363,7 @@ class BaseAgent(ABC):
                 ti = to = tc = tca = 0
                 today_models = today_data.per_model or []
                 today_rows = []
+                today_has_price = _has_any_price(today_models)
                 for pm in today_models:
                     m = pm.get("model", "?")
                     i = pm.get("input", 0) or 0
@@ -1168,16 +1375,23 @@ class BaseAgent(ABC):
                     ti += i; to += o; tc += c; tca += ca
                     t = i + o
                     cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
-                            f"缓 {fmt_num(c)}",
+                            _fmt_cache_val(c, i),
                             f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                    if today_has_price:
+                        pc = _get_model_price(m)
+                        cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
                     today_rows.append(cols)
                 if today_rows:
                     today_label = datetime.fromtimestamp(today_start).strftime("%Y-%m-%d")
                     print(f"\n  ╌╌╌╌╌ 📅 今日累计 ({today_label}) ╌╌╌╌╌")
                     if len(today_models) > 1:
                         sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
-                                   f"缓 {fmt_num(tc)}",
+                                   _fmt_cache_val(tc, ti),
                                    f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(ti + to + tc)}", f"调用 {tca}"]
+                        if today_has_price:
+                            tcs_str = _fmt_total_cost(_calc_total_cost(today_models))
+                            if tcs_str:
+                                sum_row.append(f"{tcs_str} (仅供参考)")
                         today_rows.append(sum_row)
                     aligned = _align_rows(today_rows)
                     for row in aligned:
@@ -1193,6 +1407,7 @@ class BaseAgent(ABC):
                     yti = yto = ytc = ytca = 0
                     yesterday_models = yesterday_data.per_model or []
                     yesterday_rows = []
+                    yest_has_price = _has_any_price(yesterday_models)
                     for pm in yesterday_models:
                         m = pm.get("model", "?")
                         i = pm.get("input", 0) or 0
@@ -1204,16 +1419,23 @@ class BaseAgent(ABC):
                         yti += i; yto += o; ytc += c; ytca += ca
                         t = i + o
                         cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
-                                f"缓 {fmt_num(c)}",
+                                _fmt_cache_val(c, i),
                                 f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                        if yest_has_price:
+                            pc = _get_model_price(m)
+                            cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
                         yesterday_rows.append(cols)
                     if yesterday_rows:
                         yesterday_label = datetime.fromtimestamp(yesterday_start).strftime("%Y-%m-%d")
                         print(f"\n  ╌╌╌╌╌ 📅 昨日累计 ({yesterday_label}) ╌╌╌╌╌")
                         if len(yesterday_rows) > 1:
                             sum_row = ["昨日合计", f"入 {fmt_num(yti)}", f"出 {fmt_num(yto)}",
-                                       f"缓 {fmt_num(ytc)}",
+                                       _fmt_cache_val(ytc, yti),
                                        f"总计/+缓存 {fmt_num(yti + yto)}/{fmt_num(yti + yto + ytc)}", f"调用 {ytca}"]
+                            if yest_has_price:
+                                ycs_str = _fmt_total_cost(_calc_total_cost(yesterday_models))
+                                if ycs_str:
+                                    sum_row.append(f"{ycs_str} (仅供参考)")
                             yesterday_rows.append(sum_row)
                         aligned = _align_rows(yesterday_rows)
                         for row in aligned:
@@ -1225,6 +1447,7 @@ class BaseAgent(ABC):
             # 总增量（最新累计 - 初始基线）
             total_d_tok = total_d_cache = total_d_calls = 0
             total_d_in = total_d_out = 0
+            total_d_cost = 0.0
             any_d_cache = False
             delta_data = []
             for mn, mv in sorted(bl_models.items()):
@@ -1239,17 +1462,24 @@ class BaseAgent(ABC):
                 if d_tok > 0 or d_cache > 0 or d_calls > 0:
                     if d_cache:
                         any_d_cache = True
-                    delta_data.append((mn, d_tok, d_in, d_out, d_cache, d_calls))
+                    pc = _get_model_price(mn)
+                    if pc:
+                        dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                        total_d_cost += dc
+                    delta_data.append((mn, d_tok, d_in, d_out, d_cache, d_calls, pc))
 
             if delta_data:
                 print(f"\n  监控期间增量:")
                 print("  ╌" * 30)
                 inc_rows = []
-                for (mn, d_tok, d_in, d_out, d_cache, d_calls) in delta_data:
+                for (mn, d_tok, d_in, d_out, d_cache, d_calls, pc) in delta_data:
                     cols = [mn, f"+{fmt_num(d_tok)}总计", f"+{fmt_num(d_in)}入", f"+{fmt_num(d_out)}出"]
                     if any_d_cache:
                         cols.append(f"+{fmt_num(d_cache)}存")
                     cols.append(f"+{d_calls}调用")
+                    if pc and (d_in or d_out or d_cache):
+                        dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                        cols.append(f"≈¥{dc:.4f}")
                     inc_rows.append(cols)
                 aligned = _align_rows(inc_rows)
                 for row in aligned:
@@ -1261,6 +1491,8 @@ class BaseAgent(ABC):
                     if total_d_cache:
                         sum_parts.append(f"+{fmt_num(total_d_cache)}存")
                     sum_parts.append(f"+{total_d_calls}调用")
+                    if total_d_cost > 0:
+                        sum_parts.append(f"≈¥{total_d_cost:.4f}")
                     print(f"  增量合计 | {' | '.join(sum_parts)}")
                 print("  ╌" * 30)
         else:
@@ -1474,66 +1706,53 @@ class HermesAgent(BaseAgent):
             return AgentData(name="hermes", display_name="Hermes",
                              stats=stats, raw=raw, per_model=per_model_list)
 
-        # ── 当前会话 ──
-        # 优先从 sessions.json 获取当前活跃会话 ID，精确查询
-        calls_col = "api_call_count" if has_api_calls else "0 as api_call_count"
-        tools_col = "tool_call_count" if has_tool_calls else "0 as tool_call_count"
-        current_id = _hermes_current_session_id()
-        if current_id:
-            cur = conn.execute(
-                f"SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
-                f"{calls_col}, {tools_col}, title "
-                f"FROM sessions WHERE id = ?",
-                (current_id,)
-            )
-        else:
-            cur = conn.execute(
-                f"SELECT id, model, input_tokens, output_tokens, cache_read_tokens, "
-                f"{calls_col}, {tools_col}, title "
-                f"FROM sessions ORDER BY started_at DESC LIMIT 1"
-            )
-        row = cur.fetchone()
+        # ── 全部会话统计（无时间筛选）──
+        calls_expr = "SUM(api_call_count)" if has_api_calls else "0"
+        tools_expr = "SUM(tool_call_count)" if has_tool_calls else "0"
+        cur = conn.execute(
+            f"SELECT model, SUM(input_tokens) as inp, SUM(output_tokens) as out, "
+            f"SUM(cache_read_tokens) as cache, {calls_expr} as calls, "
+            f"{tools_expr} as tools, COUNT(*) as cnt "
+            f"FROM sessions GROUP BY model"
+        )
+        rows = cur.fetchall()
+        conn.close()
 
-        if not row:
-            conn.close()
+        if not rows:
             return AgentData(
                 name="hermes", display_name="Hermes",
                 stats={}, raw="Hermes: 尚无会话记录"
             )
 
-        model = row["model"] or "unknown"
-        inp = row["input_tokens"] or 0
-        out = row["output_tokens"] or 0
-        cache = row["cache_read_tokens"] or 0
-        calls = row["api_call_count"] or 0
-        tools = row["tool_call_count"] or 0
-        title = row["title"] or "无标题"
+        total_inp = sum(r["inp"] or 0 for r in rows)
+        total_out = sum(r["out"] or 0 for r in rows)
+        total_cache = sum(r["cache"] or 0 for r in rows)
+        total_calls = sum(r["calls"] or 0 for r in rows)
+        total_sessions = sum(r["cnt"] or 0 for r in rows)
 
-        cur2 = conn.execute("SELECT COUNT(*) as cnt FROM sessions")
-        session_count = cur2.fetchone()["cnt"]
-        conn.close()
+        per_model_list = []
+        for r in rows:
+            m = r["model"] or "unknown"
+            inp = r["inp"] or 0
+            out = r["out"] or 0
+            cache = r["cache"] or 0
+            calls = r["calls"] or 0
+            per_model_list.append({"model": m, "input": inp, "output": out,
+                                    "calls": calls, "cache": cache})
 
-        cw = detect_context(model)
-
-        per_model_list = [{"model": model, "input": inp, "output": out,
-                           "calls": calls, "cache": cache}]
-        line = format_model_line(model, inp, out, cache, calls,
-                                 context_window=cw,
-                                 extra=f"第 {session_count} 轮 \"{title}\"")
-        raw = "📊 Hermes" + ("\n" + line if line else "")
+        extra_footer = f"  会话: {total_sessions} 轮"
+        raw = _build_aligned_raw("Hermes", per_model_list,
+                                 has_context=True,
+                                 extra_footer=extra_footer)
 
         stats = {
-            "model": model,
-            "input_tokens": inp,
-            "output_tokens": out,
-            "cache_read": cache,
-            "api_calls": calls,
-            "tool_calls": tools,
-            "context_window": cw,
-            "context_pct": round((inp + out) / cw * 100, 1) if cw else 0,
-            "total_tokens": inp + out,
-            "session_count": session_count,
-            "title": title,
+            "model": ", ".join(sorted({r["model"] or "unknown" for r in rows})),
+            "input_tokens": total_inp,
+            "output_tokens": total_out,
+            "cache_read": total_cache,
+            "api_calls": total_calls,
+            "total_tokens": total_inp + total_out,
+            "session_count": total_sessions,
         }
 
         return AgentData(name="hermes", display_name="Hermes",
@@ -1825,7 +2044,7 @@ class CodeXAgent(BaseAgent):
                     cnt = r["cnt"] or 0
                     per_model_list.append({"model": model, "input": ts, "output": 0,
                                             "calls": cnt, "cache": 0})
-                    # CodeX 不区分输入/输出，仅显示总计；thread=session，调用数=会话数
+                    # CodeX 不区分输入/输出，仅显示总计；thread=session
                     if ts > 0 or cnt > 0:
                         parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
                         parts.append(f"{cnt} 轮会话")
@@ -2215,14 +2434,280 @@ class OpenClawAgent(BaseAgent):
 
 
 # ═══════════════════════════════════════════════════
+#  Reasonix
+# ═══════════════════════════════════════════════════
+
+def _find_reasonix_usage() -> Optional[str]:
+    """获取 Reasonix usage.jsonl 路径"""
+    p = os.path.join(os.path.expanduser("~"), ".reasonix", "usage.jsonl")
+    return p if os.path.isfile(p) else None
+
+
+class ReasonixAgent(BaseAgent):
+    @staticmethod
+    def name() -> str:
+        return "reasonix"
+
+    @staticmethod
+    def display_name() -> str:
+        return "Reasonix"
+
+    @staticmethod
+    def detect() -> bool:
+        return _find_reasonix_usage() is not None
+
+    def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
+        usage_path = _find_reasonix_usage()
+        if not usage_path:
+            return AgentData(
+                name="reasonix", display_name="Reasonix",
+                stats={}, raw="Reasonix: 未找到 usage.jsonl"
+            )
+
+        per_model_data: dict[str, dict] = {}
+        session_names: set[str] = set()
+
+        try:
+            with open(usage_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # 时间过滤（ts 是 epoch 毫秒）
+                    rec_ts = rec.get("ts", 0) / 1000.0
+                    if from_ts is not None and rec_ts < from_ts:
+                        continue
+                    if to_ts is not None and rec_ts > to_ts:
+                        continue
+
+                    model = rec.get("model", "unknown")
+                    session_names.add(rec.get("session", ""))
+
+                    if model not in per_model_data:
+                        per_model_data[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                    per_model_data[model]["input"] += rec.get("promptTokens", 0)
+                    per_model_data[model]["output"] += rec.get("completionTokens", 0)
+                    per_model_data[model]["cache"] += rec.get("cacheHitTokens", 0)
+                    per_model_data[model]["calls"] += 1
+        except Exception as e:
+            return AgentData(
+                name="reasonix", display_name="Reasonix",
+                stats={}, raw=f"Reasonix: 读取失败 — {e}"
+            )
+
+        if not per_model_data:
+            return AgentData(
+                name="reasonix", display_name="Reasonix",
+                stats={}, raw="Reasonix: usage.jsonl 中无有效数据"
+            )
+
+        total_calls = sum(d["calls"] for d in per_model_data.values())
+        total_input = sum(d["input"] for d in per_model_data.values())
+        total_output = sum(d["output"] for d in per_model_data.values())
+        total_cache = sum(d["cache"] for d in per_model_data.values())
+        models_sorted = sorted(per_model_data.keys())
+
+        per_model_list = []
+        for mn in models_sorted:
+            md = per_model_data[mn]
+            if md["input"] + md["output"] + md["cache"] + md["calls"] == 0:
+                continue
+            per_model_list.append({
+                "model": mn,
+                "input": md["input"],
+                "output": md["output"],
+                "calls": md["calls"],
+                "cache": md["cache"],
+            })
+
+        raw = _build_aligned_raw("Reasonix", per_model_list, has_context=False,
+                                 extra_footer=f"  会话: {len(session_names)} 个")
+        stats = {
+            "model": ", ".join(models_sorted),
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cache_read": total_cache,
+            "total_tokens": total_input + total_output,
+            "api_calls": total_calls,
+            "session_count": len(session_names),
+        }
+
+        return AgentData(name="reasonix", display_name="Reasonix",
+                         stats=stats, raw=raw, per_model=per_model_list)
+
+
+# ═══════════════════════════════════════════════════
+#  DeepSeek TUI
+# ═══════════════════════════════════════════════════
+
+def _find_deepseek_tui_sessions() -> Optional[str]:
+    """获取 DeepSeek TUI sessions 目录"""
+    p = os.path.join(os.path.expanduser("~"), ".deepseek", "sessions")
+    return p if os.path.isdir(p) else None
+
+
+class DeepSeekTUIAgent(BaseAgent):
+    @staticmethod
+    def name() -> str:
+        return "deepseek-tui"
+
+    @staticmethod
+    def display_name() -> str:
+        return "DeepSeek TUI"
+
+    @staticmethod
+    def detect() -> bool:
+        d = _find_deepseek_tui_sessions()
+        if not d:
+            return False
+        # 检查是否有 .json 会话文件
+        for fname in os.listdir(d):
+            if fname.endswith(".json"):
+                return True
+        return False
+
+    def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
+        sessions_dir = _find_deepseek_tui_sessions()
+        if not sessions_dir:
+            return AgentData(
+                name="deepseek-tui", display_name="DeepSeek TUI",
+                stats={}, raw="DeepSeek TUI: 未找到 sessions 目录"
+            )
+
+        per_model_data: dict[str, dict] = {}
+        total_sessions = 0
+        total_tool_calls = 0
+        total_cost_usd = 0.0
+        total_cost_cny = 0.0
+
+        try:
+            for fname in sorted(os.listdir(sessions_dir)):
+                if not fname.endswith(".json"):
+                    continue
+                fpath = os.path.join(sessions_dir, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
+
+                metadata = data.get("metadata")
+                if not metadata:
+                    continue
+
+                # 时间过滤
+                created_str = metadata.get("created_at", "")
+                try:
+                    created_ts = datetime.fromisoformat(created_str.replace("Z", "+00:00")).timestamp()
+                except (ValueError, TypeError):
+                    created_ts = None
+
+                if from_ts is not None and created_ts is not None and created_ts < from_ts:
+                    continue
+                if to_ts is not None and created_ts is not None and created_ts > to_ts:
+                    continue
+
+                model = metadata.get("model", "unknown")
+                tokens = metadata.get("total_tokens", 0) or 0
+
+                # 统计工具调用次数（messages 中 type=tool_use）
+                tool_count = 0
+                for msg in data.get("messages", []):
+                    for item in msg.get("content", []):
+                        if isinstance(item, dict) and item.get("type") == "tool_use":
+                            tool_count += 1
+
+                # 提取费用
+                cost = metadata.get("cost", {}) or {}
+                session_cost_usd = cost.get("session_cost_usd", 0) or 0
+                session_cost_cny = cost.get("session_cost_cny", 0) or 0
+
+                if model not in per_model_data:
+                    per_model_data[model] = {"tokens": 0, "sessions": 0, "tool_calls": 0,
+                                              "cost_usd": 0.0, "cost_cny": 0.0}
+                per_model_data[model]["tokens"] += tokens
+                per_model_data[model]["sessions"] += 1
+                per_model_data[model]["tool_calls"] += tool_count
+                per_model_data[model]["cost_usd"] += session_cost_usd
+                per_model_data[model]["cost_cny"] += session_cost_cny
+                total_sessions += 1
+                total_tool_calls += tool_count
+                total_cost_usd += session_cost_usd
+                total_cost_cny += session_cost_cny
+        except Exception as e:
+            return AgentData(
+                name="deepseek-tui", display_name="DeepSeek TUI",
+                stats={}, raw=f"DeepSeek TUI: 读取失败 — {e}"
+            )
+
+        if not per_model_data:
+            return AgentData(
+                name="deepseek-tui", display_name="DeepSeek TUI",
+                stats={}, raw="DeepSeek TUI: 尚无会话记录"
+            )
+
+        models_sorted = sorted(per_model_data.keys())
+        per_model_list = []
+        raw_lines = ["📊 DeepSeek TUI"]
+        total_tok = 0
+        total_cnt = 0
+        model_count = 0
+
+        for mn in models_sorted:
+            md = per_model_data[mn]
+            ts = md["tokens"]
+            cnt = md["sessions"]
+            per_model_list.append({"model": mn, "input": ts, "output": 0,
+                                    "calls": cnt, "cache": 0})
+            if ts > 0 or cnt > 0:
+                parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
+                parts.append(f"{cnt} 轮会话")
+                if md["tool_calls"] > 0:
+                    parts.append(f"工具调用 {md['tool_calls']} 次")
+                if md["cost_cny"] > 0:
+                    parts.append(f"≈¥{md['cost_cny']:.4f}")
+                raw_lines.append(f"  {mn} | {' | '.join(parts)}")
+                model_count += 1
+            total_tok += ts
+            total_cnt += cnt
+
+        if model_count > 1:
+            raw_lines.append(f"  {'─' * 36}")
+            cost_part = f" | ≈¥{total_cost_cny:.4f}" if total_cost_cny > 0 else ""
+            raw_lines.append(f"  合计 | 总计 {fmt_num(total_tok)} | {total_cnt} 轮会话{cost_part}")
+
+        raw = "\n".join(raw_lines)
+        stats = {
+            "model": ", ".join(models_sorted),
+            "total_tokens": total_tok,
+            "session_count": total_sessions,
+            "tool_calls": total_tool_calls,
+            "cost_usd": round(total_cost_usd, 6),
+            "cost_cny": round(total_cost_cny, 4),
+        }
+
+        return AgentData(name="deepseek-tui", display_name="DeepSeek TUI",
+                         stats=stats, raw=raw, per_model=per_model_list)
+
+
+# ═══════════════════════════════════════════════════
 #  Agent 注册表
 # ═══════════════════════════════════════════════════
 
 ALL_AGENTS: list[type[BaseAgent]] = [
-    HermesAgent,
     ClaudeCodeAgent,
     CodeXAgent,
+    HermesAgent,
     OpenClawAgent,
+    ReasonixAgent,
+    DeepSeekTUIAgent,
 ]
 
 
@@ -2254,7 +2739,11 @@ def show_menu(installed: list[type[BaseAgent]], *, allow_all: bool = True):
 
     while True:
         try:
-            choice = input("请选择：").strip().lower()
+            try:
+                choice = input("请选择：").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return None
             if choice == "q":
                 return None
             if allow_all and choice == "a":
@@ -2283,8 +2772,10 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 _METRIC_LABELS = {'input': '输入', 'output': '输出', 'cache': '缓存',
-                  'calls': '调用', 'total': '总计', 'total_with_cache': '总计(含缓存)'}
-_METRIC_ORDER = ['input', 'output', 'cache', 'calls', 'total', 'total_with_cache']
+                  'cache_ratio': '缓存率', 'calls': '调用',
+                  'total': '总计', 'total_with_cache': '总计(含缓存)',
+                  'cost': '预估费用'}
+_METRIC_ORDER = ['input', 'output', 'cache', 'cache_ratio', 'calls', 'total', 'total_with_cache', 'cost']
 
 _NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 ET.register_namespace('', _NS)
@@ -2492,7 +2983,7 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
         col_widths[wb._col_letter(i)] = 16
     merges = []
     wb.add_sheet(agent_display, col_widths=col_widths, merges=merges, freeze='C2')
-    headers = ['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)']
+    headers = ['Agent', '模型', '输入', '输出', '缓存', '缓存率', '调用', '总计', '总计(含缓存)', '预估费用']
     wb.add_row(agent_display, [(h, HDR_STYLE) for h in headers])
     row_num = 2
     ms = row_num
@@ -2502,7 +2993,16 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
         cache = int(pm.get('cache', 0))
         calls = int(pm.get('calls', 0))
         model = pm.get('model', 'unknown')
-        wb.add_row(agent_display, [agent_display, model, inp, out, cache, calls, inp + out, inp + out + cache])
+        cr = _calc_cache_rate(inp, cache)
+        cr_str = f"{cr:.1f}%" if cr is not None else "-"
+        pc = _get_model_price(model)
+        if pc:
+            cost_val = _calc_cost(inp, out, cache, pc)
+            sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
+            cost_str = f"≈¥{_to_cny(cost_val, pc.get("currency", "CNY")):.4f}"
+        else:
+            cost_str = "-"
+        wb.add_row(agent_display, [agent_display, model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cost_str])
         row_num += 1
     if filtered_models:
         merges.append((ms, 1, row_num - 1, 1))
@@ -2512,10 +3012,14 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
         to = int(sum(pm.get('output', 0) for pm in filtered_models))
         tc = int(sum(pm.get('cache', 0) for pm in filtered_models))
         tca = int(sum(pm.get('calls', 0) for pm in filtered_models))
+        tcr = _calc_cache_rate(ti, tc)
+        tcr_str = f"{tcr:.1f}%" if tcr is not None else "-"
+        tcost_str = _fmt_total_cost(_calc_total_cost(filtered_models))
+        tcost_str = f"{tcost_str} (仅供参考)" if tcost_str else "-"
         wb.add_row(agent_display, [
             (f'{agent_display} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE), (to, TOT_STYLE),
-            (tc, TOT_STYLE), (tca, TOT_STYLE),
-            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+            (tc, TOT_STYLE), (tcr_str, TOT_STYLE), (tca, TOT_STYLE),
+            (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE), (tcost_str, TOT_STYLE)])
     wb.merges[agent_display] = merges
     wb.save(filepath)
 
@@ -2528,10 +3032,12 @@ def _write_xlsx_multi_simple(filepath, results):
         col_widths[wb._col_letter(i)] = 16
     merges = []
     wb.add_sheet('MultiAgent', col_widths=col_widths, merges=merges, freeze='C2')
-    headers = ['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)']
+    headers = ['Agent', '模型', '输入', '输出', '缓存', '缓存率', '调用', '总计', '总计(含缓存)', '预估费用']
     wb.add_row('MultiAgent', [(h, HDR_STYLE) for h in headers])
     row_num = 2
     grand_ti = grand_to = grand_tc = grand_tca = 0
+    grand_cost = 0.0
+    grand_cur = "CNY"
     total_agents = 0
     for agent, data in results:
         agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
@@ -2540,31 +3046,53 @@ def _write_xlsx_multi_simple(filepath, results):
         total_agents += 1
         ms = row_num
         ti = to = tc = tca = 0
+        at_cost = 0.0
+        at_cur = "CNY"
         for pm in agent_models:
             inp = int(pm.get('input', 0))
             out = int(pm.get('output', 0))
             cache = int(pm.get('cache', 0))
             calls = int(pm.get('calls', 0))
             model = pm.get('model', 'unknown')
-            wb.add_row('MultiAgent', [agent.display_name(), model, inp, out, cache, calls, inp + out, inp + out + cache])
+            cr = _calc_cache_rate(inp, cache)
+            cr_str = f"{cr:.1f}%" if cr is not None else "-"
+            pc = _get_model_price(model)
+            if pc:
+                cv = _calc_cost(inp, out, cache, pc)
+                sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
+                cs = f"≈¥{_to_cny(cv, pc.get("currency", "CNY")):.4f}"
+                at_cost += cv; at_cur = pc.get("currency","CNY")
+            else:
+                cs = "-"
+            wb.add_row('MultiAgent', [agent.display_name(), model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
             ti += inp; to += out; tc += cache; tca += calls
             row_num += 1
         merges.append((ms, 1, row_num - 1, 1))
         # 多模型时展示 Agent 合计
         if len(agent_models) > 1:
+            tcr = _calc_cache_rate(ti, tc)
+            tcr_str = f"{tcr:.1f}%" if tcr is not None else "-"
+            at_sy = "¥" if at_cur=="CNY" else "$"
+            at_cs = f"≈{at_sy}{at_cost:.4f} (仅供参考)" if at_cost > 0 else "-"
             wb.add_row('MultiAgent', [
                 (f'{agent.display_name()} 合计', TOT_STYLE), ('', TOT_STYLE), (ti, TOT_STYLE),
-                (to, TOT_STYLE), (tc, TOT_STYLE), (tca, TOT_STYLE),
-                (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE)])
+                (to, TOT_STYLE), (tc, TOT_STYLE), (tcr_str, TOT_STYLE), (tca, TOT_STYLE),
+                (ti + to, TOT_STYLE), (ti + to + tc, TOT_STYLE), (at_cs, TOT_STYLE)])
             row_num += 1
         grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
+        grand_cost += at_cost
+        if at_cost > 0: grand_cur = at_cur
     # 全部总计
     if total_agents > 1:
         gtt = grand_ti + grand_to
+        gtcr = _calc_cache_rate(grand_ti, grand_tc)
+        gtcr_str = f"{gtcr:.1f}%" if gtcr is not None else "-"
+        gsy = "¥" if grand_cur=="CNY" else "$"
+        gcs = f"≈{gsy}{grand_cost:.4f} (仅供参考)" if grand_cost > 0 else "-"
         wb.add_row('MultiAgent', [
             ('全部总计', TOT_STYLE), ('', TOT_STYLE), (grand_ti, TOT_STYLE),
-            (grand_to, TOT_STYLE), (grand_tc, TOT_STYLE), (grand_tca, TOT_STYLE),
-            (gtt, TOT_STYLE), (gtt + grand_tc, TOT_STYLE)])
+            (grand_to, TOT_STYLE), (grand_tc, TOT_STYLE), (gtcr_str, TOT_STYLE), (grand_tca, TOT_STYLE),
+            (gtt, TOT_STYLE), (gtt + grand_tc, TOT_STYLE), (gcs, TOT_STYLE)])
     wb.merges['MultiAgent'] = merges
     wb.save(filepath)
 
@@ -2802,18 +3330,33 @@ def _write_csv_simple(filepath, agent_name, agent_display, filtered_models):
     import csv
     with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)'])
+        w.writerow(['Agent', '模型', '输入', '输出', '缓存', '缓存率', '调用', '总计', '总计(含缓存)', '预估费用'])
         ti = to = tc = tca = 0
+        at_cost = 0.0; at_cur = "CNY"
         for pm in filtered_models:
             inp = int(pm.get('input', 0))
             out = int(pm.get('output', 0))
             cache = int(pm.get('cache', 0))
             calls = int(pm.get('calls', 0))
             model = pm.get('model', 'unknown')
-            w.writerow([agent_display, model, inp, out, cache, calls, inp + out, inp + out + cache])
+            cr = _calc_cache_rate(inp, cache)
+            cr_str = f"{cr:.1f}%" if cr is not None else "-"
+            pc = _get_model_price(model)
+            if pc:
+                cv = _calc_cost(inp, out, cache, pc)
+                sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
+                cs = f"≈¥{_to_cny(cv, pc.get("currency", "CNY")):.4f}"
+                at_cost += cv; at_cur = pc.get("currency","CNY")
+            else:
+                cs = "-"
+            w.writerow([agent_display, model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
             ti += inp; to += out; tc += cache; tca += calls
         if len(filtered_models) > 1:
-            w.writerow([f'{agent_display} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+            tcr = _calc_cache_rate(ti, tc)
+            tcr_str = f"{tcr:.1f}%" if tcr is not None else "-"
+            at_sy = "¥" if at_cur=="CNY" else "$"
+            at_cs = f"≈{at_sy}{at_cost:.4f} (仅供参考)" if at_cost > 0 else "-"
+            w.writerow([f'{agent_display} 合计', '', ti, to, tc, tcr_str, tca, ti + to, ti + to + tc, at_cs])
 
 
 def _write_csv_multi_simple(filepath, results):
@@ -2821,8 +3364,9 @@ def _write_csv_multi_simple(filepath, results):
     import csv
     with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(['Agent', '模型', '输入', '输出', '缓存', '调用', '总计', '总计(含缓存)'])
+        w.writerow(['Agent', '模型', '输入', '输出', '缓存', '缓存率', '调用', '总计', '总计(含缓存)', '预估费用'])
         grand_ti = grand_to = grand_tc = grand_tca = 0
+        grand_cost = 0.0; grand_cur = "CNY"
         total_agents = 0
         for agent, data in results:
             agent_models = [pm for pm in (data.per_model or []) if not _skip_model(pm)]
@@ -2830,20 +3374,41 @@ def _write_csv_multi_simple(filepath, results):
                 continue
             total_agents += 1
             ti = to = tc = tca = 0
+            at_cost = 0.0; at_cur = "CNY"
             for pm in agent_models:
                 inp = int(pm.get('input', 0))
                 out = int(pm.get('output', 0))
                 cache = int(pm.get('cache', 0))
                 calls = int(pm.get('calls', 0))
                 model = pm.get('model', 'unknown')
-                w.writerow([agent.display_name(), model, inp, out, cache, calls, inp + out, inp + out + cache])
+                cr = _calc_cache_rate(inp, cache)
+                cr_str = f"{cr:.1f}%" if cr is not None else "-"
+                pc = _get_model_price(model)
+                if pc:
+                    cv = _calc_cost(inp, out, cache, pc)
+                    sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
+                    cs = f"≈¥{_to_cny(cv, pc.get("currency", "CNY")):.4f}"
+                    at_cost += cv; at_cur = pc.get("currency","CNY")
+                else:
+                    cs = "-"
+                w.writerow([agent.display_name(), model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
                 ti += inp; to += out; tc += cache; tca += calls
             if len(agent_models) > 1:
-                w.writerow([f'{agent.display_name()} 合计', '', ti, to, tc, tca, ti + to, ti + to + tc])
+                tcr = _calc_cache_rate(ti, tc)
+                tcr_str = f"{tcr:.1f}%" if tcr is not None else "-"
+                at_sy = "¥" if at_cur=="CNY" else "$"
+                at_cs = f"≈{at_sy}{at_cost:.4f} (仅供参考)" if at_cost > 0 else "-"
+                w.writerow([f'{agent.display_name()} 合计', '', ti, to, tc, tcr_str, tca, ti + to, ti + to + tc, at_cs])
             grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
+            grand_cost += at_cost
+            if at_cost > 0: grand_cur = at_cur
         if total_agents > 1:
             gtt = grand_ti + grand_to
-            w.writerow(['全部总计', '', grand_ti, grand_to, grand_tc, grand_tca, gtt, gtt + grand_tc])
+            gtcr = _calc_cache_rate(grand_ti, grand_tc)
+            gtcr_str = f"{gtcr:.1f}%" if gtcr is not None else "-"
+            gsy = "¥" if grand_cur=="CNY" else "$"
+            gcs = f"≈{gsy}{grand_cost:.4f} (仅供参考)" if grand_cost > 0 else "-"
+            w.writerow(['全部总计', '', grand_ti, grand_to, grand_tc, gtcr_str, grand_tca, gtt, gtt + grand_tc, gcs])
 
 
 def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_months):
@@ -3107,6 +3672,7 @@ def export_interactive(data: AgentData, agent: BaseAgent,
                     "input_tokens": pm.get("input", 0),
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
+                    "cache_ratio": round(_calc_cache_rate(pm.get("input",0), pm.get("cache",0)), 1) if _calc_cache_rate(pm.get("input",0), pm.get("cache",0)) is not None else None,
                     "calls": pm.get("calls", 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
                     "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
@@ -3305,6 +3871,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                     "input_tokens": pm.get("input", 0),
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
+                    "cache_ratio": round(_calc_cache_rate(pm.get("input",0), pm.get("cache",0)), 1) if _calc_cache_rate(pm.get("input",0), pm.get("cache",0)) is not None else None,
                     "calls": pm.get("calls", 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
                     "total_with_cache": pm.get("input", 0) + pm.get("output", 0) + pm.get("cache", 0),
@@ -3419,37 +3986,95 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
         grand_ai += ai; grand_ao += ao; grand_ac += ac; grand_acall += a_calls
         grand_bi += bi; grand_bo += bo; grand_bc += bc; grand_bcall += b_calls
 
+        # 费用（仅在有价格时展示）
+        pc = _get_model_price(mn)
+        a_cost_str = f"≈¥{_to_cny(_calc_cost(ai, ao, ac, pc), pc.get('currency','CNY')):.2f}" if pc and (ai or ao or ac) else "-"
+        b_cost_str = f"≈¥{_to_cny(_calc_cost(bi, bo, bc, pc), pc.get('currency','CNY')):.2f}" if pc and (bi or bo or bc) else "-"
         metrics = [
             ("入", ai, bi),
             ("出", ao, bo),
             ("缓", ac, bc),
+            ("缓存率", f"{_calc_cache_rate(ai, ac):.1f}%" if _calc_cache_rate(ai, ac) is not None else "-",
+                      f"{_calc_cache_rate(bi, bc):.1f}%" if _calc_cache_rate(bi, bc) is not None else "-"),
             ("总计", a_total, b_total),
             ("总计(含缓存)", a_total_cache, b_total_cache),
             ("调用", a_calls, b_calls),
+            ("费用", a_cost_str, b_cost_str),
         ]
         for i, (metric_name, va, vb) in enumerate(metrics):
+            if metric_name == "缓存率":
+                d_val = ""
+            elif metric_name == "费用":
+                # 费用差：都有效时计算差值
+                if isinstance(va, str) and va.startswith("≈¥") and isinstance(vb, str) and vb.startswith("≈¥"):
+                    try:
+                        fa = float(va[2:])
+                        fb = float(vb[2:])
+                        d = fb - fa
+                        d_val = f"+¥{d:.2f}" if d > 0 else f"-¥{abs(d):.2f}" if d < 0 else "0"
+                    except ValueError:
+                        d_val = ""
+                else:
+                    d_val = ""
+            else:
+                d_val = _delta(va, vb)
             cols = ["" if i != 0 else mn, metric_name,
-                    fmt_num(va), fmt_num(vb), _delta(va, vb)]
+                    str(va), str(vb), d_val]
             rows.append(cols)
 
     # Agent 合计
-    model_count = len(rows) // len(_METRIC_ORDER) if rows else 0
+    # 每个模型有 8 个指标行（入/出/缓/缓存率/总计/总计含缓存/调用/费用）
+    metrics_per_model = 8
+    model_count = len(rows) // metrics_per_model if rows else 0
     if model_count > 1:
         grand_a_total = grand_ai + grand_ao
         grand_b_total = grand_bi + grand_bo
         grand_a_total_cache = grand_a_total + grand_ac
         grand_b_total_cache = grand_b_total + grand_bc
+        # 合计费用
+        gt_a_cost = sum(_to_cny(_calc_cost(
+            models_a.get(mn, {}).get("input",0) or 0,
+            models_a.get(mn, {}).get("output",0) or 0,
+            models_a.get(mn, {}).get("cache",0) or 0, pc),
+            pc.get("currency","CNY"))
+            for mn in all_models if (pc := _get_model_price(mn)))
+        gt_b_cost = sum(_to_cny(_calc_cost(
+            models_b.get(mn, {}).get("input",0) or 0,
+            models_b.get(mn, {}).get("output",0) or 0,
+            models_b.get(mn, {}).get("cache",0) or 0, pc),
+            pc.get("currency","CNY"))
+            for mn in all_models if (pc := _get_model_price(mn)))
+        gt_a_cost_str = f"≈¥{gt_a_cost:.2f}" if gt_a_cost > 0 else "-"
+        gt_b_cost_str = f"≈¥{gt_b_cost:.2f}" if gt_b_cost > 0 else "-"
         metrics = [
             ("入", grand_ai, grand_bi),
             ("出", grand_ao, grand_bo),
             ("缓", grand_ac, grand_bc),
+            ("缓存率", f"{_calc_cache_rate(grand_ai, grand_ac):.1f}%" if _calc_cache_rate(grand_ai, grand_ac) is not None else "-",
+                      f"{_calc_cache_rate(grand_bi, grand_bc):.1f}%" if _calc_cache_rate(grand_bi, grand_bc) is not None else "-"),
             ("总计", grand_a_total, grand_b_total),
             ("总计(含缓存)", grand_a_total_cache, grand_b_total_cache),
             ("调用", grand_acall, grand_bcall),
+            ("费用", gt_a_cost_str, gt_b_cost_str),
         ]
         for i, (metric_name, va, vb) in enumerate(metrics):
+            if metric_name == "缓存率":
+                d_val = ""
+            elif metric_name == "费用":
+                if isinstance(va, str) and va.startswith("≈¥") and isinstance(vb, str) and vb.startswith("≈¥"):
+                    try:
+                        fa = float(va[2:])
+                        fb = float(vb[2:])
+                        d = fb - fa
+                        d_val = f"+¥{d:.2f}" if d > 0 else f"-¥{abs(d):.2f}" if d < 0 else "0"
+                    except ValueError:
+                        d_val = ""
+                else:
+                    d_val = ""
+            else:
+                d_val = _delta(va, vb)
             cols = ["" if i != 0 else "合计", metric_name,
-                    fmt_num(va), fmt_num(vb), _delta(va, vb)]
+                    str(va), str(vb), d_val]
             rows.append(cols)
 
     if not rows:
@@ -3500,6 +4125,7 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
 
     any_data = False
     grand_ti = grand_to = grand_tc = grand_tca = 0
+    grand_costs: dict[str, float] = {}
     agent_count = 0
     for cls in ALL_AGENTS:
         detected = cls.detect()
@@ -3518,10 +4144,18 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
                     for pm in (data.per_model or []):
                         if _skip_model(pm):
                             continue
-                        grand_ti += pm.get("input", 0) or 0
-                        grand_to += pm.get("output", 0) or 0
-                        grand_tc += pm.get("cache", 0) or 0
-                        grand_tca += pm.get("calls", 0) or 0
+                        inp = pm.get("input", 0) or 0
+                        out = pm.get("output", 0) or 0
+                        cache = pm.get("cache", 0) or 0
+                        calls = pm.get("calls", 0) or 0
+                        grand_ti += inp
+                        grand_to += out
+                        grand_tc += cache
+                        grand_tca += calls
+                        pc = _get_model_price(pm.get("model", ""))
+                        if pc:
+                            cur = pc.get("currency", "CNY")
+                            grand_costs[cur] = grand_costs.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)
                     agent_count += 1
                 print(data.raw)
             except Exception as e:
@@ -3537,7 +4171,11 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
         gtt = grand_ti + grand_to
         print(f"\n{'═' * 50}")
         print("  全部 Agent 总计")
-        print(f"  入 {fmt_num(grand_ti)} | 出 {fmt_num(grand_to)} | 缓 {fmt_num(grand_tc)} | 总计/+缓存 {fmt_num(gtt)}/{fmt_num(gtt + grand_tc)} | 调用 {grand_tca} 次")
+        parts = f"  入 {fmt_num(grand_ti)} | 出 {fmt_num(grand_to)} | {_fmt_cache_val(grand_tc, grand_ti)} | 总计/+缓存 {fmt_num(gtt)}/{fmt_num(gtt + grand_tc)} | 调用 {grand_tca} 次"
+        total_cost_str = _fmt_total_cost(grand_costs)
+        if total_cost_str:
+            parts += f" | {total_cost_str} (仅供参考)"
+        print(parts)
 
     if not any_data:
         print("\n（所有 Agent 均无数据）")
@@ -3718,7 +4356,8 @@ def main():
     )
     parser.add_argument("-v", "--version", action="store_true", help="显示版本号")
     parser.add_argument("-l", "--list-backends", action="store_true", help="列出本机已安装的 Agent")
-    parser.add_argument("-a", "--agent", help="直接指定 Agent: hermes/claude-code/codex/openclaw")
+    parser.add_argument("--list-prices", action="store_true", help="列出 model_prices.toml 中已配置价格的模型")
+    parser.add_argument("-a", "--agent", help="直接指定 Agent: claude-code/codex/hermes/openclaw/reasonix/deepseek-tui")
     parser.add_argument("-w", "--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
                         help="实时监控模式（默认每 5 秒轮询）")
     parser.add_argument("setup_pos", nargs="?", const=True, help=argparse.SUPPRESS)
@@ -4004,6 +4643,44 @@ def main():
         print()
         return
 
+    # ── list-prices ──
+    if args.list_prices:
+        prices = _load_model_prices()
+        if not prices:
+            print("\n未找到 model_prices.toml 或无有效配置\n")
+            return
+        # 按 provider 分组
+        groups: dict[str, list[tuple[str, dict]]] = {}
+        for model, cfg in prices.items():
+            if not isinstance(cfg, dict):
+                continue
+            provider = cfg.get("provider", "Other")
+            groups.setdefault(provider, []).append((model, cfg))
+        print(f"\n模型价格配置 (model_prices.toml) — {len(prices)} 个模型\n")
+        for provider in sorted(groups.keys()):
+            print(f"── {provider} ──")
+            for model, cfg in groups[provider]:
+                cur = cfg.get("currency", "CNY")
+                sym = "¥" if cur == "CNY" else "$"
+                no_cache = cfg.get("input_no_cache_price", "-")
+                cache_p = cfg.get("input_cache_price", "-")
+                out_p = cfg.get("output_price", "-")
+                note = cfg.get("note", "")
+                parts = [
+                    f"  {model}",
+                    f"输入 {sym}{no_cache}" if no_cache != "-" and no_cache != 0 else None,
+                    f"缓存命中 {sym}{cache_p}" if cache_p != "-" and cache_p != 0 else None,
+                    f"输出 {sym}{out_p}",
+                ]
+                line = " | ".join(p for p in parts if p)
+                if note:
+                    line += f"  ({note})"
+                print(line)
+            print()
+        print("  价格单位: 每百万 (1M) tokens | USD 模型展示按 $，实际计算按 ¥7.25 换算")
+        print()
+        return
+
     # ── 解析时间段参数 ──
     from_ts = None
     to_ts = None
@@ -4107,18 +4784,30 @@ def main():
                     print(data.raw)
                 if len(results) > 1:
                     gti = gto = gtc = gtca = 0
+                    gt_costs: dict[str, float] = {}
                     for _, d in results:
                         for pm in (d.per_model or []):
                             if _skip_model(pm):
                                 continue
-                            gti += pm.get("input", 0) or 0
-                            gto += pm.get("output", 0) or 0
-                            gtc += pm.get("cache", 0) or 0
+                            inp = pm.get("input", 0) or 0
+                            out = pm.get("output", 0) or 0
+                            cache = pm.get("cache", 0) or 0
+                            gti += inp
+                            gto += out
+                            gtc += cache
                             gtca += pm.get("calls", 0) or 0
+                            pc = _get_model_price(pm.get("model", ""))
+                            if pc:
+                                cur = pc.get("currency", "CNY")
+                                gt_costs[cur] = gt_costs.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)
                     gtt = gti + gto
                     print(f"\n{'═'*50}")
                     print("  全部 Agent 总计")
-                    print(f"  入 {fmt_num(gti)} | 出 {fmt_num(gto)} | 缓 {fmt_num(gtc)} | 总计/+缓存 {fmt_num(gtt)}/{fmt_num(gtt + gtc)} | 调用 {gtca} 次")
+                    parts = f"  入 {fmt_num(gti)} | 出 {fmt_num(gto)} | {_fmt_cache_val(gtc, gti)} | 总计/+缓存 {fmt_num(gtt)}/{fmt_num(gtt + gtc)} | 调用 {gtca} 次"
+                    gt_cost_str = _fmt_total_cost(gt_costs)
+                    if gt_cost_str:
+                        parts += f" | {gt_cost_str} (仅供参考)"
+                    print(parts)
             return
         agent = agents[0]
     elif len(installed) == 1:

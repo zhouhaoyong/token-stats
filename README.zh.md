@@ -1,6 +1,6 @@
-# token-stats — 选个 Agent 看它的消耗
+# token-stats — AI Agent Token 消耗统计工具
 
-每次运行都让你选，想看哪个 Agent 就看哪个。
+统计本机 AI 编程助手的 token 消耗，支持多 Agent、多模型、多时间段查询与导出。
 
 ## 为什么选择 token-stats
 
@@ -8,7 +8,7 @@
 
 | 功能 | 命令 | 说明 |
 |------|------|------|
-| **Token 消耗统计** — 指定时间范围 | `token-stats -a claude-code --month` | 多 Agent（Hermes / Claude Code / CodeX / OpenClaw）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
+| **Token 消耗统计** — 指定时间范围 | `token-stats -a claude-code --month` | 多 Agent（Claude Code / CodeX / Hermes / OpenClaw / Reasonix / DeepSeek TUI）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
 | **实时监控** — 上下文占比追踪 | `token-stats -a claude-code --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
 | **时段对比** — 两个时间段并排比较 | `--compare --a yesterday --b today` | 任意时间段聚合，多模型横向对比，带差值列 |
 | **数据导出** — XLSX / JSON | `--export` | 多 Agent、多时间段组合，交互式选目录；年度按月拆分 |
@@ -18,17 +18,17 @@
 
 ## 环境要求
 
-装 `token-stats` 之前，你的电脑需要先有这些东西：
+安装前需满足以下环境要求：
 
-### 1. Python 3.8+
+### 1. Python 3.11+
 
-`token-stats` 本身是纯 Python 脚本，依赖标准库，不需要额外 pip 装任何包。
+`token-stats` 本身是纯 Python 脚本，依赖标准库（含 `tomllib` 用于模型价格配置），不需要额外 pip 装任何包。
 
 ```bash
 # 检查已安装（Windows 用户用 python --version）
 python3 --version
 
-# 如果没装 → 去 https://www.python.org/downloads/ 下载
+# 如未安装 → https://www.python.org/downloads/
 ```
 
 ### 2. Node.js（安装工具时需要）
@@ -39,7 +39,7 @@ python3 --version
 # 检查已安装
 node --version
 
-# 如果没装 → 去 https://nodejs.org 下载（选 LTS 版本）
+# 如未安装 → https://nodejs.org（选择 LTS 版本）
 ```
 
 装好 Node.js 后会自动带上 `npm`，用来装 ClawHub。
@@ -91,9 +91,75 @@ API 返回 usage → Agent 写入本地 → token-stats 读取汇总
 
 > 本工具定位为**本地账本**，呈现的是 Agent 记录的数据，非上游结算依据。
 
+### 缓存命中率
+
+**通用公式**：`cache_read_tokens / (cache_read_tokens + cache_creation_tokens) × 100%`
+
+所有参与缓存系统的 prompt tokens 中，命中缓存（直接从缓存读取）的比例。
+
+**token-stats 计算方式**：各 Agent 底层 API 不同，采用自适应公式：
+
+```
+如果 cache > input:  缓存率 = cache / (cache + input)   ← DeepSeek API（input = cache_miss）
+如果 cache ≤ input:  缓存率 = cache / input              ← 标准 API（input = 总 prompt）
+```
+
+| Agent | 数据来源 | 精确度 |
+|-------|---------|:---:|
+| Reasonix | `cacheHitTokens` + `cacheMissTokens` 均已知 | 精确 |
+| Claude Code / Hermes / OpenClaw | `cache_read_input_tokens`（无 creation） | 近似(偏保守) |
+| CodeX / DeepSeek TUI | 无缓存数据 | 不展示 |
+
+- `cache = 0` 时不展示缓存率
+- 对于 Anthropic API，`input_tokens` 包含不参与缓存的 tokens，实际命中率略高于展示值
+- 监控模式增量段的缓存率表示该时间窗口内的命中比例
+
+### 预估费用
+
+**配置文件**：项目根目录 `model_prices.toml`，覆盖 60+ 模型 14 个厂商。以模型名为 key（含点号的模型名需用引号包裹如 `["gemini-2.5-pro"]`），每模型配置三个价格字段：
+
+| 字段 | 含义 | 单位 |
+|------|------|------|
+| `input_no_cache_price` | 输入 token 单价（缓存未命中） | 每百万 (1M) tokens |
+| `input_cache_price` | 输入 token 单价（缓存命中） | 每百万 (1M) tokens |
+| `output_price` | 输出 token 单价 | 每百万 (1M) tokens |
+
+所有模式默认展示预估费用（有价格则显示 `≈¥X.XX`，无价格显示 `-`）。
+
+**计价公式（与缓存率逻辑一致，自适应两种 API 模式）**：
+
+```
+# 标准 API（cache ≤ input，input = 总 prompt = cacheHit + cacheMiss）
+no_cache    = input - cache      # 未命中缓存的部分
+cache_tokens = cache             # 命中缓存的部分
+
+# DeepSeek API（cache > input，input = cacheMiss 不含 cacheHit）
+no_cache    = input              # input 本身就是 cacheMiss
+cache_tokens = cache             # cache 就是 cacheHit
+
+# 统一公式
+费用 = (no_cache × input_no_cache_price
+     +  cache_tokens × input_cache_price
+     +  output × output_price) / 1,000,000
+```
+
+> 例：DeepSeek API 下，`input=570K`（cacheMiss），`output=25K`，`cache=4.28M`（cacheHit），deepseek-v4-flash 价格（no_cache=¥1.0, cache=¥0.02, output=¥2.0）。
+> 费用 = `(570000 × 1.0 + 4280000 × 0.02 + 25000 × 2.0) / 1,000,000` = `(570000 + 85600 + 50000) / 1M` = **≈¥0.71**
+
+**监控模式计价**：每轮刷新时计算增量费用。以初始快照为基线，当前累计减去基线得到各模型增量 token（Δinput/Δoutput/Δcache），代入公式求和即为本轮增量费用。停止时展示「监控期间增量」费用合计。
+
+**混币统一**：USD 定价模型按汇率 7.25 自动转为人民币展示，最终统一为 `≈¥X.XX`。
+
+**价格匹配**：先精确匹配模型名，失败时按最长前缀匹配（如 `deepseek-v4-pro-20250219` → `deepseek-v4-pro` 价格）。
+
+> ⚠️ **费用为预估值**：
+> - 缓存未中 token（`cache_creation`）在部分 API 中未暴露，导致缓存命中率存在轻微低估，实际费用可能有小幅偏差
+> - 未配置价格的模型（显示 `-`）不计入总计，多 Agent 合计行标注「仅供参考」
+> - 请以 API 结算后台为准
+
 ## 安装
 
-满足以上环境后，两行命令搞定：
+环境就绪后，执行以下命令完成安装：
 
 **macOS / Linux：**
 ```bash
@@ -115,35 +181,37 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 >
 > `setup` 会自动将 `~/.local/bin` 加入系统 PATH，**需要新开一个终端窗口**才能生效。
 
-好了。新开终端，直接敲 `token-stats` 就能用。
+安装完成后，新开终端即可使用 `token-stats` 命令。
 
 ### 验证安装成功
 
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.4.5
+# 输出: token-stats v2.6.0
 
 # 验证 2：看本机已安装的 Agent
 token-stats --list-backends
 # 输出示例:
-#   ✅ Hermes
 #   ✅ Claude Code
 #   ✅ CodeX
+#   ✅ Hermes
 #   ❌ OpenClaw
+#   ✅ Reasonix
+#   ✅ DeepSeek TUI
 
 # 验证 3：直接看某个 Agent 的统计
 token-stats -a claude-code
 # 输出示例:
 # 📊 Claude Code
-#   Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131    | 缓 0       | 总计/+缓存 23.04K/0      | 调用 1 次
-#   deepseek-v4-flash                     | 入 2.02M  | 出 77.48K | 缓 8.36M   | 总计/+缓存 2.1M/8.36M    | 调用 349 次
-#   deepseek-v4-pro                       | 入 4.9M   | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/451.87M | 调用 2348 次
-#   gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K  | 缓 0       | 总计/+缓存 90.26K/0      | 调用 4 次
-#   合计                                  | 入 7.03M  | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.3M/460.24M  | 调用 2702 次
+#   Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131     | 缓 0               | 总计/+缓存 23.04K/23.04K | 调用 1 次    | -
+#   deepseek-v4-flash                     | 入 2.59M  | 出 102.93K | 缓 12.65M (83.0%)  | 总计/+缓存 2.69M/15.34M  | 调用 514 次  | ≈¥3.05
+#   deepseek-v4-pro                       | 入 5.47M  | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次 | ≈¥84.72
+#   gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K   | 缓 0               | 总计/+缓存 90.26K/90.26K | 调用 4 次    | -
+#   合计                                  | 入 8.18M  | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次 | ≈¥87.77
 ```
 
-如果以上三条都正常输出，说明安装完全成功 🎉
+以上三条均正常输出即表示安装成功。
 
 ## 更新
 
@@ -166,39 +234,56 @@ clawhub update agent-usage-stats
 
 ## 用法
 
-### 一分钟速览
+### Agent 名称
 
-| 你想做什么 | 命令 | 适用范围 |
-|-----------|------|---------|
-| 看看今天用了多少 token | `token-stats --all -t` | **所有 Agent** |
-| 看看这个月用了多少 | `token-stats --all -m` | **所有 Agent** |
-| 只看 Claude Code 的数据 | `token-stats -a claude-code` | **单个 Agent** |
-| 边聊边看消耗跳动 | `token-stats -a claude-code -w` | **单个 Agent** |
-| 对比上周和这周 | `token-stats -a claude-code --compare --a last-week --b this-week` | **单个 Agent** |
-| 导出到 Excel | `token-stats -a claude-code -m -e` | **单个 / 所有 Agent** |
-| 弹出菜单自己选 | `token-stats` | 交互式选择 |
+`-a` / `--agent` 参数使用以下名称指定 Agent：
 
-### 常用参数
+| 名称 | Agent | 说明 |
+|------|-------|------|
+| `claude-code` | Claude Code | Anthropic 官方 CLI |
+| `codex` | CodeX | OpenAI Codex CLI |
+| `hermes` | Hermes | 第三方 AI 编码助手 |
+| `openclaw` | OpenClaw | 开源 AI 编程工具 |
+| `reasonix` | Reasonix | 国产 AI 编码 CLI |
+| `deepseek-tui` | DeepSeek TUI | DeepSeek 官方终端工具 |
 
-| 短参数 | 长参数 | 干什么用的 |
+示例：`token-stats -a claude-code --today`
+
+### 快速参考
+
+| 操作 | 命令 | 适用范围 |
+|------|------|---------|
+| 查看今日所有 Agent 统计 | `token-stats --all -t` | 所有 Agent |
+| 查看本月统计 | `token-stats --all -m` | 所有 Agent |
+| 查看单个 Agent | `token-stats -a claude-code` | 单个 Agent |
+| 实时监控 | `token-stats -a claude-code -w` | 单个 Agent |
+| 时段对比 | `token-stats -a claude-code --compare --a last-week --b this-week` | 单个 Agent |
+| 导出数据 | `token-stats -a claude-code -m -e` | 单个/所有 Agent |
+| 查看模型价格 | `token-stats --list-prices` | 配置查询 |
+| 交互式菜单 | `token-stats` | 交互式选择 |
+
+### 参数说明
+
+| 短参数 | 长参数 | 说明 |
 |:---:|---|---|
-| `-a` | `--agent` | 指定要看哪个 Agent：`hermes` / `claude-code` / `codex` / `openclaw`。多个用逗号隔开 |
-| `-t` | `--today` | 只看今天的数据 |
-| `-m` | `--month` | 看本月（1 号到今天）的数据 |
-| `-y` | `--year` | 看今年（1 月 1 号到今天）的数据 |
-| `-w` | `--watch` | 实时监控，每 5 秒刷新一次，Ctrl+C 停止 |
-| `-e` | `--export` | 导出成 Excel / CSV / JSON 文件 |
-| `-v` | `--version` | 查看当前版本号 |
-| `-l` | `--list-backends` | 看看电脑上装了哪些 AI 助手 |
-| `--all` | | 一次性查看**所有** Agent 的统计 |
+| `-a` | `--agent` | 指定 Agent，名称见上方 Agent 名称表。多个用逗号分隔 |
+| `-t` | `--today` | 今日数据 |
+| `-m` | `--month` | 本月数据（1 号至今） |
+| `-y` | `--year` | 今年数据（1 月 1 日至今） |
+| `-w` | `--watch` | 实时监控，默认 5 秒刷新，Ctrl+C 停止 |
+| `-e` | `--export` | 导出为 XLSX / CSV / JSON |
+| `-v` | `--version` | 查看版本号 |
+| `-l` | `--list-backends` | 列出本机已安装的 Agent |
+| | `--list-prices` | 列出 model_prices.toml 中已配置价格的模型 |
+| `--all` | | 查看所有 Agent 统计 |
 
-> 💡 短参数可以组合。比如 `-a claude-code -t -e` 表示"只看 Claude Code，今天的数据，导出"。
+> 短参数可组合使用。例如 `-a claude-code -t -e` 表示导出 Claude Code 今日数据。
 
 ---
 
-### 一、我想看某一个 Agent 的数据
+### 一、查看单个 Agent
 
-这里以 Claude Code 为例。把 `claude-code` 换成你用的 Agent 就行（`hermes` / `codex` / `openclaw`）。
+以下示例以 Claude Code 为例，可替换为其他 Agent（`codex` / `hermes` / `openclaw` / `reasonix` / `deepseek-tui`）。
 
 **直接看全部历史（不限时间段）：**
 
@@ -249,22 +334,22 @@ token-stats -a claude-code --last-7d
 token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
 ```
 
-输出长这样：
+输出示例：
 
 ```
 📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/10.46M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/457.96M | 调用 2348 次
-  合计              | 入 6.93M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.2M/468.44M | 调用 2702 次
+  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次 | ≈¥3.05
+  deepseek-v4-pro   | 入 5.47M | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次 | ≈¥84.72
+  合计              | 入 8.18M | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次 | ≈¥87.77
   ────────────────────────────────────
-  子代理: 17 次 | 会话: 20 个 | 项目: 4 个
+  子代理: 24 次 | 会话: 24 个 | 项目: 4 个
 ```
 
 ---
 
-### 二、我想同时看多个 Agent 的数据
+### 二、查看多个 Agent
 
-**指定要看哪几个（逗号分隔）：**
+**指定 Agent 列表（逗号分隔）：**
 
 ```bash
 # 同时看 Hermes 和 Claude Code 本月的数据
@@ -287,30 +372,46 @@ token-stats --all -m
 token-stats --all --year
 ```
 
-输出长这样：
+输出示例：
 
 ```
 📊 本机 Agent 统计汇总
 ══════════════════════════════════════════════════
 
-✅ Hermes
-📊 Hermes
-  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8%) | 入 83.5K | 出 8.92K | 缓 969.22K | 总计/+缓存 92.42K/1.06M | 调用 29 次
-
 ✅ Claude Code
 📊 Claude Code
-  deepseek-v4-flash | 入 2.02M | 出 77.48K | 缓 8.36M | 总计/+缓存 2.1M/10.46M | 调用 349 次
-  deepseek-v4-pro   | 入 4.9M  | 出 1.19M  | 缓 451.87M | 总计/+缓存 6.09M/457.96M | 调用 2348 次
-  合计              | 入 7.03M | 出 1.27M  | 缓 460.24M | 总计/+缓存 8.3M/468.54M | 调用 2702 次
+  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次 | ≈¥3.05
+  deepseek-v4-pro   | 入 5.47M | 出 1.57M | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次 | ≈¥84.72
+  合计              | 入 8.18M | 出 1.67M | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次 | ≈¥87.77
+
+✅ CodeX
+📊 CodeX
+  codex-auto-review | 总计 11.87K | 3 轮会话
+  deepseek-v4-pro   | 4 轮会话
+  gpt-5.4           | 总计 5.26M | 2 轮会话
+  gpt-5.5           | 总计 26.59M | 4 轮会话
+  合计              | 总计 31.86M | 13 轮会话
+
+✅ Hermes
+📊 Hermes
+  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8% ✅) | 入 83.5K | 出 8.92K | 缓 969.22K (92.1%) | 总计/+缓存 92.42K/1.06M | 调用 29 次 | ≈¥0.12
+
+✅ Reasonix
+📊 Reasonix
+  deepseek-v4-flash | 入 189.67K | 出 4.93K | 缓 162.18K (85.5%) | 总计/+缓存 194.6K/356.77K | 调用 14 次 | ≈¥0.20
+
+✅ DeepSeek TUI
+📊 DeepSeek TUI
+  deepseek-v4-pro | 总计 499.88K | 1 轮会话 | 工具调用 14 次 | ¥0.1477
 
 ══════════════════════════════════════════════════
   全部 Agent 总计
-  入 7.12M | 出 1.28M | 缓 461.21M | 总计/+缓存 8.4M/469.61M | 调用 2734 次
+  入 40.81M | 出 1.69M | 缓 602.59M (93.7%) | 总计/+缓存 42.5M/645.09M | 调用 3636 次 | ≈¥129.40
 ```
 
 ---
 
-### 三、我想看看电脑上装了哪些 AI 助手
+### 三、列出本机已安装的 Agent
 
 ```bash
 # 短参数
@@ -320,23 +421,25 @@ token-stats -l
 token-stats --list-backends
 ```
 
-输出长这样：
+输出示例：
 
 ```
 本机已安装的 AI 助手：
-  ✅ Hermes
   ✅ Claude Code
   ✅ CodeX
+  ✅ Hermes
   ❌ OpenClaw
+  ✅ Reasonix
+  ✅ DeepSeek TUI
 ```
 
-> ✅ = 检测到了，可以查。❌ = 没装或没数据。
+> ✅ = 已检测到，可查询。❌ = 未安装或无数据。
 
 ---
 
-### 四、我想对比两个时间段
+### 四、对比两个时间段
 
-会并排显示两个时间段的 入/出/缓/总计/总计(含缓存)/调用，带差值列，不同模型之间有 `·` 分隔线。
+并排显示两个时间段的入/出/缓/缓存率/总计/总计(含缓存)/调用，带差值列。
 
 **昨天和今天比：**
 
@@ -374,41 +477,44 @@ token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~20
 
 支持的标签：`today` / `yesterday` / `this-week` / `last-week` / `this-month` / `last-month` / `this-year` / `last-year` / `YYYY-MM-DD` / `YYYY-MM-DD~YYYY-MM-DD`
 
-输出长这样：
+输出示例：
 
 ```
-📊 对比: 2026-05-11~2026-05-17 vs 2026-05-18~2026-05-20  [Claude Code]
-=================================================================================================
-  模型              | 指标         | 2026-05-11~2026-05-17 | 2026-05-18~2026-05-20 | 变化
-─────────────────────────────────────────────────────────────────────────────────────────────────
-  deepseek-v4-flash | 入           | 8.09M                 | 5.4M                  | -2.69M
-                    | 出           | 267.71K               | 166.37K               | -101.34K
-                    | 缓           | 40.14M                | 14.09M                | -26.05M
-                    | 总计         | 8.36M                 | 5.57M                 | -2.79M
-                    | 总计(含缓存) | 48.5M                 | 19.66M                | -28.84M
-                    | 调用         | 1.19K                 | 482                   | -704
-  ································································································
-  deepseek-v4-pro   | 入           | 6.89M                 | 4.43M                 | -2.46M
-                    | 出           | 3.1M                  | 2.23M                 | -868.87K
-                    | 缓           | 1883.5M               | 890.06M               | -993.43M
-                    | 总计         | 9.99M                 | 6.66M                 | -3.33M
-                    | 总计(含缓存) | 1893.48M              | 896.72M               | -996.76M
-                    | 调用         | 6.82K                 | 4.28K                 | -2.54K
-  ································································································
-  合计              | 入           | 14.98M                | 41.99M                | +27.01M
-                    | 出           | 3.37M                 | 2.48M                 | -887.19K
-                    | 缓           | 1923.64M              | 904.15M               | -1019.48M
-                    | 总计         | 18.34M                | 44.47M                | +26.13M
-                    | 总计(含缓存) | 1941.98M              | 948.62M               | -993.36M
-                    | 调用         | 8K                    | 5.53K                 | -2.47K
-─────────────────────────────────────────────────────────────────────────────────────────────────
+📊 对比: 2026-05-22 vs 2026-05-23  [Claude Code]
+=========================================================================
+  模型              | 指标         | 2026-05-22 | 2026-05-23 | 变化
+─────────────────────────────────────────────────────────────────────────
+  deepseek-v4-flash | 入           | 0          | 570063     | +570.06K
+                    | 出           | 0          | 25455      | +25.45K
+                    | 缓           | 0          | 4281600    | +4.28M
+                    | 缓存率       | -          | 88.3%      |
+                    | 总计         | 0          | 595518     | +595.52K
+                    | 总计(含缓存) | 0          | 4877118    | +4.88M
+                    | 调用         | 0          | 165        | +165
+  ·······································································
+  deepseek-v4-pro   | 入           | 56667      | 424426     | +367.76K
+                    | 出           | 8416       | 277165     | +268.75K
+                    | 缓           | 549120     | 62059648   | +61.51M
+                    | 缓存率       | 90.6%      | 99.3%      |
+                    | 总计         | 65083      | 701591     | +636.51K
+                    | 总计(含缓存) | 614203     | 62761239   | +62.15M
+                    | 调用         | 18         | 456        | +438
+  ·······································································
+  合计              | 入           | 56667      | 994489     | +937.82K
+                    | 出           | 8416       | 302620     | +294.2K
+                    | 缓           | 549120     | 66341248   | +65.79M
+                    | 缓存率       | 90.6%      | 98.5%      |
+                    | 总计         | 65083      | 1297109    | +1.23M
+                    | 总计(含缓存) | 614203     | 67638357   | +67.02M
+                    | 调用         | 18         | 621        | +603
+─────────────────────────────────────────────────────────────────────────
 ```
 
 ---
 
-### 五、我想实时监控 token 消耗
+### 五、实时监控
 
-边用 Agent 边盯着，每几秒刷新一次，看到数字在跳。Ctrl+C 停止后会显示本次监控的汇总。
+按指定间隔刷新 token 消耗数据，支持增量展示和今日累计。Ctrl+C 停止后显示本次监控汇总。
 
 **默认 5 秒刷新一次：**
 
@@ -422,7 +528,7 @@ token-stats -a claude-code -w
 token-stats -a claude-code -w 2
 ```
 
-输出长这样：
+输出示例：
 
 ```
 📡 实时监控 [Claude Code] — 每 5 秒刷新 (Ctrl+C 停止)
@@ -448,7 +554,7 @@ token-stats -a claude-code -w 2
 
 ---
 
-### 六、我想导出数据到文件
+### 六、导出数据
 
 支持三种格式：XLSX（Excel）、CSV、JSON。年度导出会自动按月分列。
 
@@ -492,7 +598,7 @@ token-stats --all --year -e
 请选择 (1/2/3, 回车=1):
 ```
 
-直接回车就选 XLSX。也可以用管道提前选好：
+直接回车默认选择 XLSX。也可通过管道预设：
 
 ```bash
 # 选 XLSX（回车=1）
@@ -507,9 +613,9 @@ echo 3 | token-stats -a claude-code -m -e ~/Desktop
 
 ---
 
-### 七、我不想记参数，弹出菜单自己选
+### 七、交互式菜单
 
-什么都不带直接运行，会弹出菜单让你选要看哪个 Agent。
+不带任何参数直接运行，弹出菜单选择要查看的 Agent。
 
 ```bash
 token-stats
@@ -518,9 +624,11 @@ token-stats
 ```
 🔍 选择你要查看的 AI 助手：
 ────────────────────────────────────────
-  [1] Hermes
-  [2] Claude Code
-  [3] CodeX
+  [1] Claude Code
+  [2] CodeX
+  [3] Hermes
+  [4] Reasonix
+  [5] DeepSeek TUI
   [a] 所有
   [q] 退出
 ────────────────────────────────────────
@@ -533,7 +641,7 @@ token-stats
 
 ---
 
-### 八、工具自身的维护
+### 八、工具维护
 
 **查看帮助（所有命令说明）：**
 
@@ -577,19 +685,23 @@ clawhub uninstall agent-usage-stats
 
 | Agent | 当前快照 | 时间段 |
 |-------|---------|--------|
-| **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 会话轮数 | 总计 + 会话数 |
-| **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 子代理/项目数 | 同左 |
+| **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
 | **CodeX** | 总计 + 线程数 | 同左 |
-| **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 | 总计 + 调用数 |
+| **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 会话数 |
+| **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 调用数 |
+| **Reasonix** | 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
+| **DeepSeek TUI** | 总计 + 会话数 + 工具调用 + 费用 | 同左 |
 
 ### 数据来源位置（便于排查问题）
 
 | Agent | 数据读哪里 |
 |-------|-----------|
-| Hermes | `~/.hermes/state.db` → sessions 表 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads 表 |
+| Hermes | `~/.hermes/state.db` → sessions 表 |
 | OpenClaw | `~/.openclaw/agents/main/sessions/` |
+| Reasonix | `~/.reasonix/usage.jsonl` |
+| DeepSeek TUI | `~/.deepseek/sessions/*.json` |
 
 ### Windows + WSL2 用户
 
@@ -650,7 +762,7 @@ clawhub uninstall agent-usage-stats
 
 | 环境 | 要求 |
 |------|------|
-| Python | 3.8+（标准库，零 pip 依赖） |
+| Python | 3.11+（标准库，零 pip 依赖） |
 | Node.js | 仅安装时需要（装 ClawHub） |
 
 ---
@@ -755,10 +867,12 @@ python3 ~/skills/agent-usage-stats/token-stats.py setup
 
 | Agent | 检测路径 |
 |-------|---------|
-| **Hermes** | `~/.hermes/state.db` |
 | **Claude Code** | `~/.claude/projects/` |
 | **CodeX** | `~/.codex/state_*.sqlite` |
+| **Hermes** | `~/.hermes/state.db` |
 | **OpenClaw** | `~/.openclaw/agents/main/sessions/sessions.json` |
+| **Reasonix** | `~/.reasonix/usage.jsonl` |
+| **DeepSeek TUI** | `~/.deepseek/sessions/` |
 
 可以先用 `token-stats --list-backends` 看具体哪个被检测到了。
 

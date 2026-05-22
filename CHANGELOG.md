@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.6.0 (2026-05-23)
+
+### 新增
+
+**Agent 支持**
+- **Reasonix Agent**：从 `~/.reasonix/usage.jsonl` 读取 token 统计，支持时间过滤和分会话聚合
+- **DeepSeek TUI Agent**：从 `~/.deepseek/sessions/*.json` 读取统计，展示总 tokens、会话数、工具调用次数、费用
+
+**缓存命中率**
+- 所有模式（快照/监控/导出/对比）新增缓存命中率展示
+- 自适应公式：`cache > input` 时用 `cache/(cache+input)`（DeepSeek API），否则用 `cache/input`（标准 API）
+- 终端展示格式：`缓 162.18K (85.5%)`
+
+**预估费用**
+- 新增 `model_prices.toml` 配置文件，覆盖 60+ 模型 14 个厂商
+- 所有模式默认展示预估费用（`≈¥X.XX` 或 `≈$X.XX`），无价格模型显示 `-`
+- 费用 = input × input_price + output × output_price + cache × cache_read_price（均按 1M tokens 计）
+- 监控摘要行追加增量费用：`── [02:47:16] +5.62K tokens +2 调用 ≈¥0.0034 ──`
+
+### 变更
+
+- Python 最低版本要求从 3.8 提升至 3.11（`tomllib` 标准库要求）
+- Agent 展示顺序调整为：Claude Code → CodeX → Hermes → OpenClaw → Reasonix → DeepSeek TUI
+- 配置文件从 JSON 改为 TOML（支持注释，`model_prices.toml`）
+- 新增 `--list-prices` 参数，按厂商分组展示 60+ 模型价格
+
+### 修复
+
+- **Hermes 无时间筛选时只返回当前会话**：`_collect_impl()` 在 `from_ts=None, to_ts=None` 时走入「当前会话」分支，导致 `--all` 统计漏掉历史数据。现已改为与其他 Agent 一致的「全部会话聚合」逻辑
+- **watch 模式 per-model 增量费用 USD 未转 CNY**：`_calc_cost()` 结果直接当 CNY 展示，Anthropic/Google 等 USD 模型费用显示偏低。3 处增量费用计算均改为 `_to_cny()` 统一转 CNY
+- **watch 模式偶发假 delta 尖峰**：`bl_models` 在「无新活动」tick 时不更新，若某轮因文件读写竞态读到不完整数据，下一轮恢复后已累积的多轮 delta 会一次性显示为巨大尖峰。改为每轮无条件更新 baseline 并清理已消失模型
+
+### 已知限制
+
+- **DeepSeek Anthropic 端点费用偏差**：Claude Code 通过 `api.deepseek.com/anthropic` 使用 DeepSeek 模型时，API 返回的 `usage`（记录在 JSONL 中）与实际计费 tokens 使用不同 tokenizer 计数，导致预估费用偏高约 2-3 倍。此偏差源于 API 端点行为，非 token-stats 计算公式或价格错误。直接使用 DeepSeek 原生 API（如 Hermes）的费用预估是准确的。
+
 ## v2.5.8 (2026-05-22)
 
 ### 修复
