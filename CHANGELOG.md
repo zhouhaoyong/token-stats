@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.6.1 (2026-05-23)
+
+### 修复
+
+- **`token-stats update` 漏搜本地 `skills/` 目录**：`clawhub install` 安装到当前目录的 `./skills/` 时，update 代码只搜索 `~/skills/` 和 `~/.clawhub/skills/`，导致版本检测失败。已将脚本所在目录的 `skills/` 加入搜索路径
+
 ## v2.6.0 (2026-05-23)
 
 ### 新增
