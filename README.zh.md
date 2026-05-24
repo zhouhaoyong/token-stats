@@ -213,6 +213,7 @@ clawhub update agent-usage-stats
 | 实时监控 | `token-stats -a claude-code -w` | 单个 Agent |
 | 时段对比 | `token-stats -a claude-code --compare --a last-week --b this-week` | 单个 Agent |
 | 导出数据 | `token-stats -a claude-code -m -e` | 单个/所有 Agent |
+| 查看模型价格 | `token-stats --list-prices` | 配置查询 |
 | 交互式菜单 | `token-stats` | 交互式选择 |
 
 ### 参数说明
@@ -227,6 +228,7 @@ clawhub update agent-usage-stats
 | `-e` | `--export` | 导出为 XLSX / CSV / JSON |
 | `-v` | `--version` | 查看版本号 |
 | `-l` | `--list-backends` | 列出本机已安装的 Agent |
+| `--list-prices` | | 列出已配置价格的模型 |
 | `--all` | | 查看所有 Agent 统计 |
 
 > 短参数可组合使用。例如 `-a claude-code -t -e` 表示导出 Claude Code 今日数据。
@@ -628,12 +630,12 @@ clawhub uninstall agent-usage-stats
 
 | Agent | 当前快照 | 时间段 |
 |-------|---------|--------|
-| **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 缓存率 | 同左 |
+| **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
 | **CodeX** | 总计 + 线程数 | 同左 |
-| **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 | 总计 + 会话数 |
-| **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 | 总计 + 调用数 |
-| **Reasonix** | 输入/输出/缓存 + 调用次数 + 缓存率 | 同左 |
-| **DeepSeek TUI** | 总计 + 会话数 + 工具调用 | 同左 |
+| **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 会话数 |
+| **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 调用数 |
+| **Reasonix** | 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
+| **DeepSeek TUI** | 总计 + 会话数 + 工具调用 + 预估费用 | 同左 |
 
 > **说明**：DeepSeek TUI 展示的「工具调用」与其他 Agent 的「调用」含义不同。其他 Agent 的「调用」指 API 请求次数，而 DeepSeek TUI 统计的是会话中模型实际执行工具（读文件、搜索、执行命令等）的次数。这是由 DeepSeek TUI 的 session 数据模型决定的。
 

@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.2"
+VERSION = "2.6.3"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -3140,8 +3140,8 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
                 else:
                     v = md.get(metric, 0)
                 tot += v
-                vals.append((int(v), 0))
-            vals.append((int(tot), 0))
+                vals.append((v if metric != "cost" else (f"≈¥{v:.4f}" if v else "0"), 0))
+            vals.append((tot if metric != "cost" else (f"≈¥{tot:.4f}" if tot else "0"), 0))
             wb.add_row(agent_display, vals)
             row_num += 1
         merges.append((ms, 2, row_num - 1, 2))  # Model merge
@@ -3167,8 +3167,8 @@ def _write_xlsx_monthly(filepath, agent_name, agent_display, monthly_data, all_m
                     else:
                         ct += md.get(metric, 0)
                 gt_all += ct
-                vals.append((int(ct), TOT_STYLE))
-            vals.append((int(gt_all), TOT_STYLE))
+                vals.append((ct if metric != "cost" else (f"≈¥{ct:.4f}" if ct else "0"), TOT_STYLE))
+            vals.append((gt_all if metric != "cost" else (f"≈¥{gt_all:.4f}" if gt_all else "0"), TOT_STYLE))
             wb.add_row(agent_display, vals)
             row_num += 1
         merges.append((gt, 1, row_num - 1, 1))
@@ -3210,8 +3210,8 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
                     else:
                         v = md.get(metric, 0)
                     tot += v
-                    vals.append((int(v), 0))
-                vals.append((int(tot), 0))
+                    vals.append((v if metric != "cost" else (f"≈¥{v:.4f}" if v else "0"), 0))
+                vals.append((tot if metric != "cost" else (f"≈¥{tot:.4f}" if tot else "0"), 0))
                 rows_data.append((vals, 'data', agent_name, agent_display, model))
         # 多模型时展示 Agent 合计
         if len(all_models) > 1:
@@ -3232,7 +3232,7 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
                         else:
                             ct += md.get(metric, 0)
                     ag_total += ct
-                    vals.append((int(ct), TOT_STYLE))
+                    vals.append((ct if metric != "cost" else (f"≈¥{ct:.4f}" if ct else "0"), TOT_STYLE))
                 vals.append((int(ag_total), TOT_STYLE))
                 rows_data.append((vals, 'agent_subtotal', agent_name, agent_display, None))
 
@@ -3321,8 +3321,8 @@ def _write_xlsx_multi_monthly(filepath, agents_monthly, all_months, agent_order)
                     else:
                         ct += md.get(metric, 0)
             gt_all += ct
-            vals.append((int(ct), TOT_STYLE))
-        vals.append((int(gt_all), TOT_STYLE))
+            vals.append((ct if metric != "cost" else (f"≈¥{ct:.4f}" if ct else "0"), TOT_STYLE))
+        vals.append((gt_all if metric != "cost" else (f"≈¥{gt_all:.4f}" if gt_all else "0"), TOT_STYLE))
         wb.add_row(sheet_name, vals)
         row_num += 1
     merges.append((gt, 1, row_num - 1, 1))
@@ -3442,8 +3442,8 @@ def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_mo
                     else:
                         v = md.get(metric, 0)
                     tot += v
-                    row.append(int(v))
-                row.append(int(tot))
+                    row.append(v if metric != "cost" else (f"≈¥{v:.4f}" if v else "0"))
+                row.append(tot if metric != "cost" else (f"≈¥{tot:.4f}" if tot else "0"))
                 w.writerow(row)
         # 多模型时展示合计
         if len(all_models) > 1:
@@ -3463,8 +3463,8 @@ def _write_csv_monthly(filepath, agent_name, agent_display, monthly_data, all_mo
                     else:
                         ct += md.get(metric, 0)
                 gt_all += ct
-                row.append(int(ct))
-            row.append(int(gt_all))
+                row.append(ct if metric != "cost" else (f"≈¥{ct:.4f}" if ct else "0"))
+            row.append(gt_all if metric != "cost" else (f"≈¥{gt_all:.4f}" if gt_all else "0"))
             w.writerow(row)
 
 
@@ -3492,8 +3492,8 @@ def _write_csv_multi_monthly(filepath, agent_order, all_months):
                         else:
                             v = md.get(metric, 0)
                         tot += v
-                        row.append(int(v))
-                    row.append(int(tot))
+                        row.append(v if metric != "cost" else (f"≈¥{v:.4f}" if v else "0"))
+                    row.append(tot if metric != "cost" else (f"≈¥{tot:.4f}" if tot else "0"))
                     w.writerow(row)
             # 多模型时展示 Agent 合计
             if len(all_models) > 1:
@@ -3513,8 +3513,8 @@ def _write_csv_multi_monthly(filepath, agent_order, all_months):
                             else:
                                 ct += md.get(metric, 0)
                         ag_total += ct
-                        row.append(int(ct))
-                    row.append(int(ag_total))
+                        row.append(ct if metric != "cost" else (f"≈¥{ct:.4f}" if ct else "0"))
+                    row.append(ag_total if metric != "cost" else (f"≈¥{ag_total:.4f}" if ag_total else "0"))
                     w.writerow(row)
         # 全部总计
         if len(agent_order) > 1:
@@ -3533,8 +3533,8 @@ def _write_csv_multi_monthly(filepath, agent_order, all_months):
                             else:
                                 ct += md.get(metric, 0)
                     gt_all += ct
-                    row.append(int(ct))
-                row.append(int(gt_all))
+                    row.append(ct if metric != "cost" else (f"≈¥{ct:.4f}" if ct else "0"))
+                row.append(gt_all if metric != "cost" else (f"≈¥{gt_all:.4f}" if gt_all else "0"))
                 w.writerow(row)
 
 
@@ -3557,13 +3557,20 @@ def export_interactive(data: AgentData, agent: BaseAgent,
             for idx, (label, m_start, m_end) in enumerate(months, 1):
                 print(f"  ⏳ 正在收集 {label} 数据 ({idx}/{total_months})...", end="\r", flush=True)
                 m_data = agent.collect(from_ts=m_start, to_ts=m_end)
-                monthly_data[label] = {
-                    pm.get("model", "unknown"): {
-                        "input": pm.get("input", 0), "output": pm.get("output", 0),
-                        "cache": pm.get("cache", 0), "calls": pm.get("calls", 0),
+                monthly_data[label] = {}
+                for pm in (m_data.per_model or []):
+                    if _skip_model(pm):
+                        continue
+                    mn = pm.get("model", "unknown")
+                    inp = pm.get("input", 0) or 0
+                    out = pm.get("output", 0) or 0
+                    cache = pm.get("cache", 0) or 0
+                    pc = _get_model_price(mn)
+                    cost = _to_cny(_calc_cost(inp, out, cache, pc), pc.get("currency", "CNY")) if pc else 0
+                    monthly_data[label][mn] = {
+                        "input": inp, "output": out, "cache": cache,
+                        "calls": pm.get("calls", 0), "cost": cost,
                     }
-                    for pm in (m_data.per_model or []) if not _skip_model(pm)
-                }
             print(" " * 40, end="\r")
             # 从月度数据汇总 filtered_models
             all_models = sorted({m for d in monthly_data.values() for m in d})
@@ -3750,13 +3757,20 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                 for idx, (label, m_start, m_end) in enumerate(months, 1):
                     print(f"  ⏳ 正在收集 {agent.display_name()} {label} 数据 ({idx}/{total_months}) [{agent_idx}/{total_agents}]...", end="\r", flush=True)
                     m_data = agent.collect(from_ts=m_start, to_ts=m_end)
-                    monthly_data[label] = {
-                        pm.get("model", "unknown"): {
-                            "input": pm.get("input", 0), "output": pm.get("output", 0),
-                            "cache": pm.get("cache", 0), "calls": pm.get("calls", 0),
+                    monthly_data[label] = {}
+                    for pm in (m_data.per_model or []):
+                        if _skip_model(pm):
+                            continue
+                        mn = pm.get("model", "unknown")
+                        inp = pm.get("input", 0) or 0
+                        out = pm.get("output", 0) or 0
+                        cache = pm.get("cache", 0) or 0
+                        pc = _get_model_price(mn)
+                        cost = _to_cny(_calc_cost(inp, out, cache, pc), pc.get("currency", "CNY")) if pc else 0
+                        monthly_data[label][mn] = {
+                            "input": inp, "output": out, "cache": cache,
+                            "calls": pm.get("calls", 0), "cost": cost,
                         }
-                        for pm in (m_data.per_model or []) if not _skip_model(pm)
-                    }
                 print(" " * 60, end="\r")
                 agent_order.append((agent.name(), agent.display_name(), monthly_data))
             print(" " * 60, end="\r")
