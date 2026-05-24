@@ -22,7 +22,7 @@
 
 ### 1. Python 3.11+
 
-`token-stats` 本身是纯 Python 脚本，依赖标准库（含 `tomllib` 用于模型价格配置），不需要额外 pip 装任何包。
+`token-stats` 本身是纯 Python 脚本，依赖标准库，不需要额外 pip 装任何包。
 
 ```bash
 # 检查已安装（Windows 用户用 python --version）
@@ -114,49 +114,6 @@ API 返回 usage → Agent 写入本地 → token-stats 读取汇总
 - 对于 Anthropic API，`input_tokens` 包含不参与缓存的 tokens，实际命中率略高于展示值
 - 监控模式增量段的缓存率表示该时间窗口内的命中比例
 
-### 预估费用
-
-**配置文件**：项目根目录 `model_prices.toml`，覆盖 60+ 模型 14 个厂商。以模型名为 key（含点号的模型名需用引号包裹如 `["gemini-2.5-pro"]`），每模型配置三个价格字段：
-
-| 字段 | 含义 | 单位 |
-|------|------|------|
-| `input_no_cache_price` | 输入 token 单价（缓存未命中） | 每百万 (1M) tokens |
-| `input_cache_price` | 输入 token 单价（缓存命中） | 每百万 (1M) tokens |
-| `output_price` | 输出 token 单价 | 每百万 (1M) tokens |
-
-所有模式默认展示预估费用（有价格则显示 `≈¥X.XX`，无价格显示 `-`）。
-
-**计价公式（与缓存率逻辑一致，自适应两种 API 模式）**：
-
-```
-# 标准 API（cache ≤ input，input = 总 prompt = cacheHit + cacheMiss）
-no_cache    = input - cache      # 未命中缓存的部分
-cache_tokens = cache             # 命中缓存的部分
-
-# DeepSeek API（cache > input，input = cacheMiss 不含 cacheHit）
-no_cache    = input              # input 本身就是 cacheMiss
-cache_tokens = cache             # cache 就是 cacheHit
-
-# 统一公式
-费用 = (no_cache × input_no_cache_price
-     +  cache_tokens × input_cache_price
-     +  output × output_price) / 1,000,000
-```
-
-> 例：DeepSeek API 下，`input=570K`（cacheMiss），`output=25K`，`cache=4.28M`（cacheHit），deepseek-v4-flash 价格（no_cache=¥1.0, cache=¥0.02, output=¥2.0）。
-> 费用 = `(570000 × 1.0 + 4280000 × 0.02 + 25000 × 2.0) / 1,000,000` = `(570000 + 85600 + 50000) / 1M` = **≈¥0.71**
-
-**监控模式计价**：每轮刷新时计算增量费用。以初始快照为基线，当前累计减去基线得到各模型增量 token（Δinput/Δoutput/Δcache），代入公式求和即为本轮增量费用。停止时展示「监控期间增量」费用合计。
-
-**混币统一**：USD 定价模型按汇率 7.25 自动转为人民币展示，最终统一为 `≈¥X.XX`。
-
-**价格匹配**：先精确匹配模型名，失败时按最长前缀匹配（如 `deepseek-v4-pro-20250219` → `deepseek-v4-pro` 价格）。
-
-> ⚠️ **费用为预估值**：
-> - 缓存未中 token（`cache_creation`）在部分 API 中未暴露，导致缓存命中率存在轻微低估，实际费用可能有小幅偏差
-> - 未配置价格的模型（显示 `-`）不计入总计，多 Agent 合计行标注「仅供参考」
-> - 请以 API 结算后台为准
-
 ## 安装
 
 环境就绪后，执行以下命令完成安装：
@@ -205,11 +162,8 @@ token-stats -a claude-code
 # 输出示例:
 # 📊 Claude Code
 #   Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131     | 缓 0               | 总计/+缓存 23.04K/23.04K | 调用 1 次    | -
-#   deepseek-v4-flash                     | 入 2.59M  | 出 102.93K | 缓 12.65M (83.0%)  | 总计/+缓存 2.69M/15.34M  | 调用 514 次  | ≈¥3.05
-#   deepseek-v4-pro                       | 入 5.47M  | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次 | ≈¥84.72
-#   gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K   | 缓 0               | 总计/+缓存 90.26K/90.26K | 调用 4 次    | -
-#   合计                                  | 入 8.18M  | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次 | ≈¥87.77
-```
+#   deepseek-v4-flash                     | 入 2.59M  | 出 102.93K | 缓 12.65M (83.0%)  | 总计/+缓存 2.69M/15.34M  | 调用 514 次 #   deepseek-v4-pro                       | 入 5.47M  | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次#   gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K   | 缓 0               | 总计/+缓存 90.26K/90.26K | 调用 4 次    | -
+#   合计                                  | 入 8.18M  | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次```
 
 以上三条均正常输出即表示安装成功。
 
@@ -259,7 +213,6 @@ clawhub update agent-usage-stats
 | 实时监控 | `token-stats -a claude-code -w` | 单个 Agent |
 | 时段对比 | `token-stats -a claude-code --compare --a last-week --b this-week` | 单个 Agent |
 | 导出数据 | `token-stats -a claude-code -m -e` | 单个/所有 Agent |
-| 查看模型价格 | `token-stats --list-prices` | 配置查询 |
 | 交互式菜单 | `token-stats` | 交互式选择 |
 
 ### 参数说明
@@ -274,7 +227,6 @@ clawhub update agent-usage-stats
 | `-e` | `--export` | 导出为 XLSX / CSV / JSON |
 | `-v` | `--version` | 查看版本号 |
 | `-l` | `--list-backends` | 列出本机已安装的 Agent |
-| | `--list-prices` | 列出 model_prices.toml 中已配置价格的模型 |
 | `--all` | | 查看所有 Agent 统计 |
 
 > 短参数可组合使用。例如 `-a claude-code -t -e` 表示导出 Claude Code 今日数据。
@@ -338,10 +290,7 @@ token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
 
 ```
 📊 Claude Code
-  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次 | ≈¥3.05
-  deepseek-v4-pro   | 入 5.47M | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次 | ≈¥84.72
-  合计              | 入 8.18M | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次 | ≈¥87.77
-  ────────────────────────────────────
+  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次  deepseek-v4-pro   | 入 5.47M | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次  合计              | 入 8.18M | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次  ────────────────────────────────────
   子代理: 24 次 | 会话: 24 个 | 项目: 4 个
 ```
 
@@ -380,10 +329,7 @@ token-stats --all --year
 
 ✅ Claude Code
 📊 Claude Code
-  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次 | ≈¥3.05
-  deepseek-v4-pro   | 入 5.47M | 出 1.57M | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次 | ≈¥84.72
-  合计              | 入 8.18M | 出 1.67M | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次 | ≈¥87.77
-
+  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次  deepseek-v4-pro   | 入 5.47M | 出 1.57M | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次  合计              | 入 8.18M | 出 1.67M | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次
 ✅ CodeX
 📊 CodeX
   codex-auto-review | 总计 11.87K | 3 轮会话
@@ -394,20 +340,17 @@ token-stats --all --year
 
 ✅ Hermes
 📊 Hermes
-  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8% ✅) | 入 83.5K | 出 8.92K | 缓 969.22K (92.1%) | 总计/+缓存 92.42K/1.06M | 调用 29 次 | ≈¥0.12
-
+  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8% ✅) | 入 83.5K | 出 8.92K | 缓 969.22K (92.1%) | 总计/+缓存 92.42K/1.06M | 调用 29 次
 ✅ Reasonix
 📊 Reasonix
-  deepseek-v4-flash | 入 189.67K | 出 4.93K | 缓 162.18K (85.5%) | 总计/+缓存 194.6K/356.77K | 调用 14 次 | ≈¥0.20
-
+  deepseek-v4-flash | 入 189.67K | 出 4.93K | 缓 162.18K (85.5%) | 总计/+缓存 194.6K/356.77K | 调用 14 次
 ✅ DeepSeek TUI
 📊 DeepSeek TUI
-  deepseek-v4-pro | 总计 499.88K | 1 轮会话 | 工具调用 14 次 | ¥0.1477
+  deepseek-v4-pro | 总计 499.88K | 1 轮会话 | 工具调用 14 次
 
 ══════════════════════════════════════════════════
   全部 Agent 总计
-  入 40.81M | 出 1.69M | 缓 602.59M (93.7%) | 总计/+缓存 42.5M/645.09M | 调用 3636 次 | ≈¥129.40
-```
+  入 40.81M | 出 1.69M | 缓 602.59M (93.7%) | 总计/+缓存 42.5M/645.09M | 调用 3636 次```
 
 ---
 
@@ -685,12 +628,14 @@ clawhub uninstall agent-usage-stats
 
 | Agent | 当前快照 | 时间段 |
 |-------|---------|--------|
-| **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
+| **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 缓存率 | 同左 |
 | **CodeX** | 总计 + 线程数 | 同左 |
-| **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 会话数 |
-| **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 调用数 |
-| **Reasonix** | 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
-| **DeepSeek TUI** | 总计 + 会话数 + 工具调用 + 费用 | 同左 |
+| **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 | 总计 + 会话数 |
+| **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 | 总计 + 调用数 |
+| **Reasonix** | 输入/输出/缓存 + 调用次数 + 缓存率 | 同左 |
+| **DeepSeek TUI** | 总计 + 会话数 + 工具调用 | 同左 |
+
+> **说明**：DeepSeek TUI 展示的「工具调用」与其他 Agent 的「调用」含义不同。其他 Agent 的「调用」指 API 请求次数，而 DeepSeek TUI 统计的是会话中模型实际执行工具（读文件、搜索、执行命令等）的次数。这是由 DeepSeek TUI 的 session 数据模型决定的。
 
 ### 数据来源位置（便于排查问题）
 

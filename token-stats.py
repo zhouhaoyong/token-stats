@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.1"
+VERSION = "2.6.2"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -1818,6 +1818,7 @@ class ClaudeCodeAgent(BaseAgent):
             self._cached_sub_count = 0
             self._cached_project_count = 0
             messages = []
+            _seen = set()  # 去重：(model, inp, out, cache)
             projects = set()
 
             if sessions:
@@ -1845,12 +1846,21 @@ class ClaudeCodeAgent(BaseAgent):
                                     msg_ts = dt.timestamp()
                                 except (ValueError, TypeError):
                                     msg_ts = None
+                                inp = usage.get('input_tokens', 0)
+                                out = usage.get('output_tokens', 0)
+                                cache = usage.get('cache_read_input_tokens', 0)
+                                # Claude Code JSONL 会将同一 API 响应的 usage 存多份
+                                # （时间戳可能略有差异），需按 (model, inp, out, cache) 去重
+                                key = (model, inp, out, cache)
+                                if key in _seen:
+                                    continue
+                                _seen.add(key)
                                 messages.append({
                                     'ts': msg_ts,
                                     'model': model,
-                                    'input': usage.get('input_tokens', 0),
-                                    'output': usage.get('output_tokens', 0),
-                                    'cache': usage.get('cache_read_input_tokens', 0),
+                                    'input': inp,
+                                    'output': out,
+                                    'cache': cache,
                                 })
                     except Exception:
                         continue
