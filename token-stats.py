@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.4"
+VERSION = "2.6.5"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -352,12 +352,58 @@ def fmt_pct(pct: float) -> str:
 _model_prices_cache = None
 
 
+def _parse_simple_toml(path: str) -> dict:
+    """极简 TOML 解析器，仅支持 [section] + key = value（兼容 Python < 3.11）"""
+    import re
+    data = {}
+    current_section = None
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # 注释在行尾
+            line = re.sub(r'\s+#.*$', '', line)
+            # [section] or ["section.with.dots"]
+            m = re.match(r'^\[(.+)\]$', line)
+            if m:
+                section = m.group(1).strip()
+                # 去引号（如 ["claude-haiku-3.5"]）
+                if section.startswith('"') and section.endswith('"'):
+                    section = section[1:-1]
+                elif section.startswith("'") and section.endswith("'"):
+                    section = section[1:-1]
+                if section not in data:
+                    data[section] = {}
+                current_section = data[section]
+                continue
+            # key = value
+            if "=" in line and current_section is not None:
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip()
+                # 字符串值去引号
+                if val.startswith('"') and val.endswith('"'):
+                    val = val[1:-1]
+                elif val.startswith("'") and val.endswith("'"):
+                    val = val[1:-1]
+                # 数字转换
+                else:
+                    try:
+                        val = float(val)
+                        if val == int(val):
+                            val = int(val)
+                    except ValueError:
+                        pass
+                current_section[key] = val
+    return data
+
+
 def _load_model_prices() -> dict:
     """加载 model_prices.toml，失败返回 {}。结果缓存。"""
     global _model_prices_cache
     if _model_prices_cache is not None:
         return _model_prices_cache
-    # 查找配置文件：先找项目根目录，再找脚本所在目录
     candidates = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_prices.toml"),
         os.path.join(os.getcwd(), "model_prices.toml"),
@@ -370,7 +416,7 @@ def _load_model_prices() -> dict:
                     with open(cp, "rb") as f:
                         data = tomllib.load(f)
                 else:
-                    data = {}
+                    data = _parse_simple_toml(cp)
             except Exception:
                 data = {}
             _model_prices_cache = data

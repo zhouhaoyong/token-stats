@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.6.5 (2026-05-25)
+
+### 修复
+
+- **Python 3.10 价格加载失败**：`tomllib` 需 Python 3.11+，导致 `model_prices.toml` 加载为空。新增内置极简 TOML 解析器 `_parse_simple_toml()`，Python < 3.11 时 fallback 使用
+
 ## v2.6.4 (2026-05-25)
 
 ### 修复
