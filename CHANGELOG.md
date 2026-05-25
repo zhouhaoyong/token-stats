@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.6.6 (2026-05-25)
+
+### 修复
+
+- **CodeX watch 模式"今日"不更新**：CodeX `collect()` 时间筛选使用 `created_at`，但 `tokens_used` 随会话进行而增长，旧 thread 的 `created_at` 不变导致"今日"查询漏掉大部分活跃 thread。改为使用 `updated_at` 筛选，并在 watch 模式中对累计型 agent（仅有 `tokens_used` 无入/出区分）使用基线差分计算"今日"，不再调用 `collect(from_ts=today_start)`
+- **CodeX watch 模式显示格式**：CodeX 不区分输入/输出 token，但 watch 模式始终显示"入/出"格式。新增 `AgentData.token_mode` 字段（`"split"` / `"total"`），CodeX 标记为 `"total"`，watch 渲染时显示"总计"而非"入 X / 出 0"
+
 ## v2.6.5 (2026-05-25)
 
 ### 修复

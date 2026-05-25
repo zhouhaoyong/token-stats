@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.5"
+VERSION = "2.6.6"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -226,9 +226,9 @@ def _codex_collect_via_wsl(db_path, from_ts=None, to_ts=None):
     if from_ts or to_ts:
         parts = []
         if from_ts:
-            parts.append(f"created_at >= {int(from_ts)}")
+            parts.append(f"updated_at >= {int(from_ts)}")
         if to_ts:
-            parts.append(f"created_at <= {int(to_ts)}")
+            parts.append(f"updated_at <= {int(to_ts)}")
         where = " WHERE " + " AND ".join(parts)
     script = (
         "import sqlite3,json;c=sqlite3.connect(r'%s');c.row_factory=sqlite3.Row;"
@@ -1053,6 +1053,7 @@ class AgentData:
     stats: dict
     raw: str
     per_model: list = None  # [{"model": ..., "input": N, "output": N, "calls": N, "cache": N}, ...]
+    token_mode: str = "split"  # "split" = 区分入/出, "total" = 仅有总计（CodeX）
 
 
 class BaseAgent(ABC):
@@ -1126,6 +1127,10 @@ class BaseAgent(ABC):
                     "cache": data_first.stats.get("cache_read", 0),
                 }
 
+        # 累计型 agent（如 CodeX，仅存 tokens_used）用基线差分计算"今日"
+        is_total_mode = (getattr(data_first, 'token_mode', 'split') == "total")
+        today_start_baseline = {k: dict(v) for k, v in bl_models.items()} if is_total_mode else None
+
         # ── 初始状态 ──
         bl_initial = {k: dict(v) for k, v in bl_models.items()}
         print("初始状态:")
@@ -1144,10 +1149,13 @@ class BaseAgent(ABC):
                     pct = round(total / cw * 100, 1) if cw else 0
                     cols.append(_progress_bar(pct))
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                cols.append(f"入 {fmt_num(mv['input'])}")
-                cols.append(f"出 {fmt_num(mv['output'])}")
-                cols.append(_fmt_cache_val(cache_val, mv['input']))
-                cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_val)}")
+                if is_total_mode:
+                    cols.append(f"总计 {fmt_num(total)}")
+                else:
+                    cols.append(f"入 {fmt_num(mv['input'])}")
+                    cols.append(f"出 {fmt_num(mv['output'])}")
+                    cols.append(_fmt_cache_val(cache_val, mv['input']))
+                    cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_val)}")
                 cols.append(f"调用 {mv['calls']}")
                 if bl_has_price:
                     pc = _get_model_price(mn)
@@ -1217,6 +1225,9 @@ class BaseAgent(ABC):
             if new_today_start > today_start:
                 yesterday_start = today_start
                 today_start = new_today_start
+                # 累计型 agent 重置"今日"基线
+                if is_total_mode and today_start_baseline is not None:
+                    today_start_baseline = {k: dict(v) for k, v in now_models.items()}
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print()
                 print("  " + "═" * 58)
@@ -1284,16 +1295,19 @@ class BaseAgent(ABC):
                         pct = round(total / cw * 100, 1) if cw else 0
                         cols.append(_progress_bar(pct))
                         cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                    cols.append(f"入 +{fmt_num(d_in)}")
-                    cols.append(f"出 +{fmt_num(d_out)}")
-                    if any_cache_now:
-                        rate = _calc_cache_rate(d_in, d_cache)
-                        if rate is not None:
-                            cols.append(f"缓 +{fmt_num(d_cache)} ({min(rate, 99.9):.1f}%)")
-                        else:
-                            cols.append(f"缓 +{fmt_num(d_cache)}")
-                    d_total = d_in + d_out
-                    cols.append(f"总计/+缓存 +{fmt_num(d_total)}/+{fmt_num(d_total + d_cache)}")
+                    if is_total_mode:
+                        cols.append(f"总计 +{fmt_num(d_tok)}")
+                    else:
+                        cols.append(f"入 +{fmt_num(d_in)}")
+                        cols.append(f"出 +{fmt_num(d_out)}")
+                        if any_cache_now:
+                            rate = _calc_cache_rate(d_in, d_cache)
+                            if rate is not None:
+                                cols.append(f"缓 +{fmt_num(d_cache)} ({min(rate, 99.9):.1f}%)")
+                            else:
+                                cols.append(f"缓 +{fmt_num(d_cache)}")
+                        d_total = d_in + d_out
+                        cols.append(f"总计/+缓存 +{fmt_num(d_total)}/+{fmt_num(d_total + d_cache)}")
                     cols.append(f"调用 +{d_calls}")
                     if delta_has_price:
                         pc = _get_model_price(mn)
@@ -1316,42 +1330,88 @@ class BaseAgent(ABC):
 
                 # 📅 今日合计
                 try:
-                    today_data = self.collect(from_ts=today_start)
                     print(f"  ╌╌╌╌╌ 📅 今日 ╌╌╌╌╌")
-                    ti = to = tc = tca = 0
-                    today_models = today_data.per_model or []
-                    today_rows = []
-                    today_has_price = _has_any_price(today_models)
-                    for pm in today_models:
-                        m = pm.get("model", "?")
-                        i = pm.get("input", 0) or 0
-                        o = pm.get("output", 0) or 0
-                        c = pm.get("cache", 0) or 0
-                        ca = pm.get("calls", 0) or 0
-                        if i == 0 and o == 0 and ca == 0:
-                            continue
-                        ti += i; to += o; tc += c; tca += ca
-                        t = i + o
-                        cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
-                                _fmt_cache_val(c, i),
-                                f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
-                        if today_has_price:
-                            pc = _get_model_price(m)
-                            cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
-                        today_rows.append(cols)
-                    if today_rows:
-                        if len(today_models) > 1:
-                            sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
-                                       _fmt_cache_val(tc, ti),
-                                       f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(ti + to + tc)}", f"调用 {tca}"]
+                    if is_total_mode and today_start_baseline is not None:
+                        # 累计型 agent：用基线差分计算今日增量
+                        ti = to = tc = tca = 0
+                        today_rows = []
+                        today_has_price = any(_get_model_price(mn) for mn in now_models)
+                        for mn, mv in now_models.items():
+                            bl = today_start_baseline.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+                            i = mv["input"] - bl["input"]
+                            o = mv["output"] - bl["output"]
+                            c = mv.get("cache", 0) - bl.get("cache", 0)
+                            ca = mv["calls"] - bl["calls"]
+                            if i == 0 and o == 0 and ca == 0:
+                                continue
+                            ti += i; to += o; tc += c; tca += ca
+                            t = i + o
+                            cols = [mn, f"总计 {fmt_num(t)}",
+                                    f"调用 {ca}"]
                             if today_has_price:
-                                tc_sum_str = _fmt_total_cost(_calc_total_cost(today_models))
-                                if tc_sum_str:
-                                    sum_row.append(f"{tc_sum_str} (仅供参考)")
-                            today_rows.append(sum_row)
-                        aligned = _align_rows(today_rows)
-                        for row in aligned:
-                            print(f"  {' | '.join(row)}")
+                                pc = _get_model_price(mn)
+                                cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
+                            today_rows.append(cols)
+                        if today_rows:
+                            if len(today_rows) > 1:
+                                sum_row = ["今日合计", f"总计 {fmt_num(ti + to)}",
+                                           f"调用 {tca}"]
+                                if today_has_price:
+                                    # 构造临时 per_model 用于费用计算
+                                    tmp_models = [{"model": mn, "input": mv["input"] - today_start_baseline.get(mn, {"input":0}).get("input",0),
+                                                   "output": 0, "cache": 0, "calls": 0} for mn, mv in now_models.items()]
+                                    tcs_str = _fmt_total_cost(_calc_total_cost(tmp_models))
+                                    if tcs_str:
+                                        sum_row.append(f"{tcs_str} (仅供参考)")
+                                today_rows.append(sum_row)
+                            aligned = _align_rows(today_rows)
+                            for row in aligned:
+                                print(f"  {' | '.join(row)}")
+                    else:
+                        today_data = self.collect(from_ts=today_start)
+                        ti = to = tc = tca = 0
+                        today_models = today_data.per_model or []
+                        today_rows = []
+                        today_has_price = _has_any_price(today_models)
+                        is_today_total = (getattr(today_data, 'token_mode', 'split') == "total")
+                        for pm in today_models:
+                            m = pm.get("model", "?")
+                            i = pm.get("input", 0) or 0
+                            o = pm.get("output", 0) or 0
+                            c = pm.get("cache", 0) or 0
+                            ca = pm.get("calls", 0) or 0
+                            if i == 0 and o == 0 and ca == 0:
+                                continue
+                            ti += i; to += o; tc += c; tca += ca
+                            t = i + o
+                            if is_today_total:
+                                cols = [m, f"总计 {fmt_num(t)}",
+                                        f"调用 {ca}"]
+                            else:
+                                cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                                        _fmt_cache_val(c, i),
+                                        f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                            if today_has_price:
+                                pc = _get_model_price(m)
+                                cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
+                            today_rows.append(cols)
+                        if today_rows:
+                            if len(today_models) > 1:
+                                if is_today_total:
+                                    sum_row = ["今日合计", f"总计 {fmt_num(ti + to)}",
+                                               f"调用 {tca}"]
+                                else:
+                                    sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
+                                               _fmt_cache_val(tc, ti),
+                                               f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(ti + to + tc)}", f"调用 {tca}"]
+                                if today_has_price:
+                                    tc_sum_str = _fmt_total_cost(_calc_total_cost(today_models))
+                                    if tc_sum_str:
+                                        sum_row.append(f"{tc_sum_str} (仅供参考)")
+                                today_rows.append(sum_row)
+                            aligned = _align_rows(today_rows)
+                            for row in aligned:
+                                print(f"  {' | '.join(row)}")
                     print("  ╌" * 30)
                 except Exception:
                     pass
@@ -1390,10 +1450,13 @@ class BaseAgent(ABC):
                     pct = round(total / cw * 100, 1) if cw else 0
                     cols.append(_progress_bar(pct))
                     cols.append(f"{fmt_num(total)}/{fmt_num(cw)}")
-                cols.append(f"入 {fmt_num(mv['input'])}")
-                cols.append(f"出 {fmt_num(mv['output'])}")
-                cols.append(_fmt_cache_val(cache_v, mv['input']))
-                cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_v)}")
+                if is_total_mode:
+                    cols.append(f"总计 {fmt_num(total)}")
+                else:
+                    cols.append(f"入 {fmt_num(mv['input'])}")
+                    cols.append(f"出 {fmt_num(mv['output'])}")
+                    cols.append(_fmt_cache_val(cache_v, mv['input']))
+                    cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache_v)}")
                 cols.append(f"调用 {mv['calls']}")
                 if bl_has_price:
                     pc = _get_model_price(mn)
@@ -1405,44 +1468,85 @@ class BaseAgent(ABC):
 
             # 📅 今日累计
             try:
-                today_data = self.collect(from_ts=today_start)
-                ti = to = tc = tca = 0
-                today_models = today_data.per_model or []
-                today_rows = []
-                today_has_price = _has_any_price(today_models)
-                for pm in today_models:
-                    m = pm.get("model", "?")
-                    i = pm.get("input", 0) or 0
-                    o = pm.get("output", 0) or 0
-                    c = pm.get("cache", 0) or 0
-                    ca = pm.get("calls", 0) or 0
-                    if i == 0 and o == 0 and ca == 0:
-                        continue
-                    ti += i; to += o; tc += c; tca += ca
-                    t = i + o
-                    cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
-                            _fmt_cache_val(c, i),
-                            f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
-                    if today_has_price:
-                        pc = _get_model_price(m)
-                        cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
-                    today_rows.append(cols)
-                if today_rows:
-                    today_label = datetime.fromtimestamp(today_start).strftime("%Y-%m-%d")
-                    print(f"\n  ╌╌╌╌╌ 📅 今日累计 ({today_label}) ╌╌╌╌╌")
-                    if len(today_models) > 1:
-                        sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
-                                   _fmt_cache_val(tc, ti),
-                                   f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(ti + to + tc)}", f"调用 {tca}"]
+                today_label = datetime.fromtimestamp(today_start).strftime("%Y-%m-%d")
+                print(f"\n  ╌╌╌╌╌ 📅 今日累计 ({today_label}) ╌╌╌╌╌")
+                if is_total_mode and today_start_baseline is not None:
+                    # 累计型 agent：用基线差分
+                    ti = to = tc = tca = 0
+                    today_rows = []
+                    today_has_price = any(_get_model_price(mn) for mn in bl_models)
+                    for mn, mv in sorted(bl_models.items()):
+                        bl = today_start_baseline.get(mn, {"input": 0, "output": 0, "calls": 0, "cache": 0})
+                        i = mv["input"] - bl["input"]
+                        o = mv["output"] - bl["output"]
+                        c = mv.get("cache", 0) - bl.get("cache", 0)
+                        ca = mv["calls"] - bl["calls"]
+                        if i == 0 and o == 0 and ca == 0:
+                            continue
+                        ti += i; to += o; tc += c; tca += ca
+                        t = i + o
+                        cols = [mn, f"总计 {fmt_num(t)}", f"调用 {ca}"]
                         if today_has_price:
-                            tcs_str = _fmt_total_cost(_calc_total_cost(today_models))
-                            if tcs_str:
-                                sum_row.append(f"{tcs_str} (仅供参考)")
-                        today_rows.append(sum_row)
-                    aligned = _align_rows(today_rows)
-                    for row in aligned:
-                        print(f"  {' | '.join(row)}")
-                    print("  ╌" * 30)
+                            pc = _get_model_price(mn)
+                            cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
+                        today_rows.append(cols)
+                    if today_rows:
+                        if len(today_rows) > 1:
+                            sum_row = ["今日合计", f"总计 {fmt_num(ti + to)}", f"调用 {tca}"]
+                            if today_has_price:
+                                tmp_models = [{"model": mn, "input": mv["input"] - today_start_baseline.get(mn, {"input":0}).get("input",0),
+                                               "output": 0, "cache": 0, "calls": 0} for mn, mv in bl_models.items()]
+                                tcs_str = _fmt_total_cost(_calc_total_cost(tmp_models))
+                                if tcs_str:
+                                    sum_row.append(f"{tcs_str} (仅供参考)")
+                            today_rows.append(sum_row)
+                        aligned = _align_rows(today_rows)
+                        for row in aligned:
+                            print(f"  {' | '.join(row)}")
+                else:
+                    today_data = self.collect(from_ts=today_start)
+                    ti = to = tc = tca = 0
+                    today_models = today_data.per_model or []
+                    today_rows = []
+                    today_has_price = _has_any_price(today_models)
+                    is_today_total = (getattr(today_data, 'token_mode', 'split') == "total")
+                    for pm in today_models:
+                        m = pm.get("model", "?")
+                        i = pm.get("input", 0) or 0
+                        o = pm.get("output", 0) or 0
+                        c = pm.get("cache", 0) or 0
+                        ca = pm.get("calls", 0) or 0
+                        if i == 0 and o == 0 and ca == 0:
+                            continue
+                        ti += i; to += o; tc += c; tca += ca
+                        t = i + o
+                        if is_today_total:
+                            cols = [m, f"总计 {fmt_num(t)}", f"调用 {ca}"]
+                        else:
+                            cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                                    _fmt_cache_val(c, i),
+                                    f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                        if today_has_price:
+                            pc = _get_model_price(m)
+                            cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
+                        today_rows.append(cols)
+                    if today_rows:
+                        if len(today_models) > 1:
+                            if is_today_total:
+                                sum_row = ["今日合计", f"总计 {fmt_num(ti + to)}", f"调用 {tca}"]
+                            else:
+                                sum_row = ["今日合计", f"入 {fmt_num(ti)}", f"出 {fmt_num(to)}",
+                                           _fmt_cache_val(tc, ti),
+                                           f"总计/+缓存 {fmt_num(ti + to)}/{fmt_num(ti + to + tc)}", f"调用 {tca}"]
+                            if today_has_price:
+                                tcs_str = _fmt_total_cost(_calc_total_cost(today_models))
+                                if tcs_str:
+                                    sum_row.append(f"{tcs_str} (仅供参考)")
+                            today_rows.append(sum_row)
+                        aligned = _align_rows(today_rows)
+                        for row in aligned:
+                            print(f"  {' | '.join(row)}")
+                print("  ╌" * 30)
             except Exception:
                 pass
 
@@ -1454,6 +1558,7 @@ class BaseAgent(ABC):
                     yesterday_models = yesterday_data.per_model or []
                     yesterday_rows = []
                     yest_has_price = _has_any_price(yesterday_models)
+                    is_yest_total = (getattr(yesterday_data, 'token_mode', 'split') == "total")
                     for pm in yesterday_models:
                         m = pm.get("model", "?")
                         i = pm.get("input", 0) or 0
@@ -1464,9 +1569,12 @@ class BaseAgent(ABC):
                             continue
                         yti += i; yto += o; ytc += c; ytca += ca
                         t = i + o
-                        cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
-                                _fmt_cache_val(c, i),
-                                f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
+                        if is_yest_total:
+                            cols = [m, f"总计 {fmt_num(t)}", f"调用 {ca}"]
+                        else:
+                            cols = [m, f"入 {fmt_num(i)}", f"出 {fmt_num(o)}",
+                                    _fmt_cache_val(c, i),
+                                    f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
                         if yest_has_price:
                             pc = _get_model_price(m)
                             cols.append(_fmt_cost(i, o, c, pc) if pc else "-")
@@ -1475,9 +1583,12 @@ class BaseAgent(ABC):
                         yesterday_label = datetime.fromtimestamp(yesterday_start).strftime("%Y-%m-%d")
                         print(f"\n  ╌╌╌╌╌ 📅 昨日累计 ({yesterday_label}) ╌╌╌╌╌")
                         if len(yesterday_rows) > 1:
-                            sum_row = ["昨日合计", f"入 {fmt_num(yti)}", f"出 {fmt_num(yto)}",
-                                       _fmt_cache_val(ytc, yti),
-                                       f"总计/+缓存 {fmt_num(yti + yto)}/{fmt_num(yti + yto + ytc)}", f"调用 {ytca}"]
+                            if is_yest_total:
+                                sum_row = ["昨日合计", f"总计 {fmt_num(yti + yto)}", f"调用 {ytca}"]
+                            else:
+                                sum_row = ["昨日合计", f"入 {fmt_num(yti)}", f"出 {fmt_num(yto)}",
+                                           _fmt_cache_val(ytc, yti),
+                                           f"总计/+缓存 {fmt_num(yti + yto)}/{fmt_num(yti + yto + ytc)}", f"调用 {ytca}"]
                             if yest_has_price:
                                 ycs_str = _fmt_total_cost(_calc_total_cost(yesterday_models))
                                 if ycs_str:
@@ -1519,8 +1630,11 @@ class BaseAgent(ABC):
                 print("  ╌" * 30)
                 inc_rows = []
                 for (mn, d_tok, d_in, d_out, d_cache, d_calls, pc) in delta_data:
-                    cols = [mn, f"+{fmt_num(d_tok)}总计", f"+{fmt_num(d_in)}入", f"+{fmt_num(d_out)}出"]
-                    if any_d_cache:
+                    if is_total_mode:
+                        cols = [mn, f"+{fmt_num(d_tok)}总计"]
+                    else:
+                        cols = [mn, f"+{fmt_num(d_tok)}总计", f"+{fmt_num(d_in)}入", f"+{fmt_num(d_out)}出"]
+                    if any_d_cache and not is_total_mode:
                         cols.append(f"+{fmt_num(d_cache)}存")
                     cols.append(f"+{d_calls}调用")
                     if pc and (d_in or d_out or d_cache):
@@ -1531,10 +1645,13 @@ class BaseAgent(ABC):
                 for row in aligned:
                     print(f"  {' | '.join(row)}")
                 if len(delta_data) > 1:
-                    sum_parts = [f"+{fmt_num(total_d_tok)}总计",
-                                 f"+{fmt_num(total_d_in)}入",
-                                 f"+{fmt_num(total_d_out)}出"]
-                    if total_d_cache:
+                    if is_total_mode:
+                        sum_parts = [f"+{fmt_num(total_d_tok)}总计"]
+                    else:
+                        sum_parts = [f"+{fmt_num(total_d_tok)}总计",
+                                     f"+{fmt_num(total_d_in)}入",
+                                     f"+{fmt_num(total_d_out)}出"]
+                    if total_d_cache and not is_total_mode:
                         sum_parts.append(f"+{fmt_num(total_d_cache)}存")
                     sum_parts.append(f"+{total_d_calls}调用")
                     if total_d_cost > 0:
@@ -2032,7 +2149,7 @@ class CodeXAgent(BaseAgent):
         if not result or not result.get("rows"):
             return AgentData(
                 name="codex", display_name="CodeX (WSL)",
-                stats={}, raw="CodeX (WSL): 该时间段内无会话记录", per_model=[]
+                stats={}, raw="CodeX (WSL): 该时间段内无会话记录", per_model=[], token_mode="total"
             )
         rows = result["rows"]
         per_model_list = []
@@ -2049,14 +2166,14 @@ class CodeXAgent(BaseAgent):
             "total_tokens": total_tok, "session_count": total_cnt,
         }
         raw = _build_aligned_raw("CodeX (WSL)", per_model_list)
-        return AgentData(name="codex", display_name="CodeX", stats=stats, raw=raw, per_model=per_model_list)
+        return AgentData(name="codex", display_name="CodeX", stats=stats, raw=raw, per_model=per_model_list, token_mode="total")
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
         db = _find_codex_db()
         if not db:
             return AgentData(
                 name="codex", display_name="CodeX",
-                stats={}, raw="CodeX: 未检测到数据库文件"
+                stats={}, raw="CodeX: 未检测到数据库文件", token_mode="total"
             )
         # WSL UNC 路径跳过直连
         if _is_wsl_unc(db):
@@ -2069,10 +2186,10 @@ class CodeXAgent(BaseAgent):
                 where = []
                 params = []
                 if from_ts is not None:
-                    where.append("created_at >= ?")
+                    where.append("updated_at >= ?")
                     params.append(int(from_ts))
                 if to_ts is not None:
-                    where.append("created_at <= ?")
+                    where.append("updated_at <= ?")
                     params.append(int(to_ts))
                 clause = " AND ".join(where)
 
@@ -2087,7 +2204,7 @@ class CodeXAgent(BaseAgent):
                 if not rows:
                     return AgentData(
                         name="codex", display_name="CodeX",
-                        stats={}, raw="CodeX: 该时间段内无会话记录"
+                        stats={}, raw="CodeX: 该时间段内无会话记录", token_mode="total"
                     )
 
                 per_model_list = []
@@ -2115,7 +2232,7 @@ class CodeXAgent(BaseAgent):
                     "session_count": total_cnt,
                 }
                 return AgentData(name="codex", display_name="CodeX",
-                                 stats=stats, raw=raw, per_model=per_model_list)
+                                 stats=stats, raw=raw, per_model=per_model_list, token_mode="total")
 
             # ── 默认：汇总所有线程（按模型） ──
             cur = conn.execute(
@@ -2131,7 +2248,7 @@ class CodeXAgent(BaseAgent):
             if not rows:
                 return AgentData(
                     name="codex", display_name="CodeX",
-                    stats={}, raw="CodeX: 尚无会话记录"
+                    stats={}, raw="CodeX: 尚无会话记录", token_mode="total"
                 )
 
             per_model_list = []
@@ -2169,12 +2286,12 @@ class CodeXAgent(BaseAgent):
                 "session_count": total_sessions,
             }
             return AgentData(name="codex", display_name="CodeX",
-                             stats=stats, raw=raw, per_model=per_model_list)
+                             stats=stats, raw=raw, per_model=per_model_list, token_mode="total")
 
         except Exception as e:
             return AgentData(
                 name="codex", display_name="CodeX",
-                stats={}, raw=f"CodeX: 读取失败 — {e}"
+                stats={}, raw=f"CodeX: 读取失败 — {e}", token_mode="total"
             )
 
 
