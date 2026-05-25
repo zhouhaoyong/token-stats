@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.3"
+VERSION = "2.6.4"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -444,7 +444,7 @@ def _calc_total_cost(per_model_list: list) -> dict[str, float]:
             inp = pm.get("input", 0) or 0
             out = pm.get("output", 0) or 0
             cache = pm.get("cache", 0) or 0
-            cur = pc.get("currency", "CNY")
+            cur = pc.get('currency', 'CNY')
             totals[cur] = totals.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)
     return totals
 
@@ -1200,7 +1200,7 @@ class BaseAgent(ABC):
                     d_cache = mv.get("cache", 0) - bl.get("cache", 0)
                     pc = _get_model_price(mn)
                     if pc and (d_in or d_out or d_cache):
-                        delta_cost += _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                        delta_cost += _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                 if delta_cost > 0:
                     summary_parts.append(f"≈¥{delta_cost:.4f}")
                 print(f"── [{ts}] {' '.join(summary_parts)} ──")
@@ -1252,7 +1252,7 @@ class BaseAgent(ABC):
                     if delta_has_price:
                         pc = _get_model_price(mn)
                         if pc and (d_in or d_out or d_cache):
-                            dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                            dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                             cols.append(f"≈¥{dc:.4f}")
                         else:
                             cols.append("-")
@@ -1464,7 +1464,7 @@ class BaseAgent(ABC):
                         any_d_cache = True
                     pc = _get_model_price(mn)
                     if pc:
-                        dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                        dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                         total_d_cost += dc
                     delta_data.append((mn, d_tok, d_in, d_out, d_cache, d_calls, pc))
 
@@ -1478,7 +1478,7 @@ class BaseAgent(ABC):
                         cols.append(f"+{fmt_num(d_cache)}存")
                     cols.append(f"+{d_calls}调用")
                     if pc and (d_in or d_out or d_cache):
-                        dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get("currency", "CNY"))
+                        dc = _to_cny(_calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                         cols.append(f"≈¥{dc:.4f}")
                     inc_rows.append(cols)
                 aligned = _align_rows(inc_rows)
@@ -3008,8 +3008,8 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models):
         pc = _get_model_price(model)
         if pc:
             cost_val = _calc_cost(inp, out, cache, pc)
-            sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
-            cost_str = f"≈¥{_to_cny(cost_val, pc.get("currency", "CNY")):.4f}"
+            sy = "¥" if pc.get('currency','CNY')=="CNY" else "$"
+            cost_str = f"≈¥{_to_cny(cost_val, pc.get('currency', 'CNY')):.4f}"
         else:
             cost_str = "-"
         wb.add_row(agent_display, [agent_display, model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cost_str])
@@ -3069,9 +3069,9 @@ def _write_xlsx_multi_simple(filepath, results):
             pc = _get_model_price(model)
             if pc:
                 cv = _calc_cost(inp, out, cache, pc)
-                sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
-                cs = f"≈¥{_to_cny(cv, pc.get("currency", "CNY")):.4f}"
-                at_cost += cv; at_cur = pc.get("currency","CNY")
+                sy = "¥" if pc.get('currency','CNY')=="CNY" else "$"
+                cs = f"≈¥{_to_cny(cv, pc.get('currency', 'CNY')):.4f}"
+                at_cost += cv; at_cur = pc.get('currency','CNY')
             else:
                 cs = "-"
             wb.add_row('MultiAgent', [agent.display_name(), model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
@@ -3354,9 +3354,9 @@ def _write_csv_simple(filepath, agent_name, agent_display, filtered_models):
             pc = _get_model_price(model)
             if pc:
                 cv = _calc_cost(inp, out, cache, pc)
-                sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
-                cs = f"≈¥{_to_cny(cv, pc.get("currency", "CNY")):.4f}"
-                at_cost += cv; at_cur = pc.get("currency","CNY")
+                sy = "¥" if pc.get('currency','CNY')=="CNY" else "$"
+                cs = f"≈¥{_to_cny(cv, pc.get('currency', 'CNY')):.4f}"
+                at_cost += cv; at_cur = pc.get('currency','CNY')
             else:
                 cs = "-"
             w.writerow([agent_display, model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
@@ -3396,9 +3396,9 @@ def _write_csv_multi_simple(filepath, results):
                 pc = _get_model_price(model)
                 if pc:
                     cv = _calc_cost(inp, out, cache, pc)
-                    sy = "¥" if pc.get("currency","CNY")=="CNY" else "$"
-                    cs = f"≈¥{_to_cny(cv, pc.get("currency", "CNY")):.4f}"
-                    at_cost += cv; at_cur = pc.get("currency","CNY")
+                    sy = "¥" if pc.get('currency','CNY')=="CNY" else "$"
+                    cs = f"≈¥{_to_cny(cv, pc.get('currency', 'CNY')):.4f}"
+                    at_cost += cv; at_cur = pc.get('currency','CNY')
                 else:
                     cs = "-"
                 w.writerow([agent.display_name(), model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
@@ -3566,7 +3566,7 @@ def export_interactive(data: AgentData, agent: BaseAgent,
                     out = pm.get("output", 0) or 0
                     cache = pm.get("cache", 0) or 0
                     pc = _get_model_price(mn)
-                    cost = _to_cny(_calc_cost(inp, out, cache, pc), pc.get("currency", "CNY")) if pc else 0
+                    cost = _to_cny(_calc_cost(inp, out, cache, pc), pc.get('currency', 'CNY')) if pc else 0
                     monthly_data[label][mn] = {
                         "input": inp, "output": out, "cache": cache,
                         "calls": pm.get("calls", 0), "cost": cost,
@@ -3766,7 +3766,7 @@ def export_multi(results: list[tuple[BaseAgent, AgentData]],
                         out = pm.get("output", 0) or 0
                         cache = pm.get("cache", 0) or 0
                         pc = _get_model_price(mn)
-                        cost = _to_cny(_calc_cost(inp, out, cache, pc), pc.get("currency", "CNY")) if pc else 0
+                        cost = _to_cny(_calc_cost(inp, out, cache, pc), pc.get('currency', 'CNY')) if pc else 0
                         monthly_data[label][mn] = {
                             "input": inp, "output": out, "cache": cache,
                             "calls": pm.get("calls", 0), "cost": cost,
@@ -4060,13 +4060,13 @@ def run_compare(agent: BaseAgent, a_label: str, b_label: str):
             models_a.get(mn, {}).get("input",0) or 0,
             models_a.get(mn, {}).get("output",0) or 0,
             models_a.get(mn, {}).get("cache",0) or 0, pc),
-            pc.get("currency","CNY"))
+            pc.get('currency','CNY'))
             for mn in all_models if (pc := _get_model_price(mn)))
         gt_b_cost = sum(_to_cny(_calc_cost(
             models_b.get(mn, {}).get("input",0) or 0,
             models_b.get(mn, {}).get("output",0) or 0,
             models_b.get(mn, {}).get("cache",0) or 0, pc),
-            pc.get("currency","CNY"))
+            pc.get('currency','CNY'))
             for mn in all_models if (pc := _get_model_price(mn)))
         gt_a_cost_str = f"≈¥{gt_a_cost:.2f}" if gt_a_cost > 0 else "-"
         gt_b_cost_str = f"≈¥{gt_b_cost:.2f}" if gt_b_cost > 0 else "-"
@@ -4178,7 +4178,7 @@ def show_all(*, from_ts: float = None, to_ts: float = None):
                         grand_tca += calls
                         pc = _get_model_price(pm.get("model", ""))
                         if pc:
-                            cur = pc.get("currency", "CNY")
+                            cur = pc.get('currency', 'CNY')
                             grand_costs[cur] = grand_costs.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)
                     agent_count += 1
                 print(data.raw)
@@ -4824,7 +4824,7 @@ def main():
                             gtca += pm.get("calls", 0) or 0
                             pc = _get_model_price(pm.get("model", ""))
                             if pc:
-                                cur = pc.get("currency", "CNY")
+                                cur = pc.get('currency', 'CNY')
                                 gt_costs[cur] = gt_costs.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)
                     gtt = gti + gto
                     print(f"\n{'═'*50}")

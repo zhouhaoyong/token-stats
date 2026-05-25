@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.6.4 (2026-05-25)
+
+### 修复
+
+- **Python < 3.12 兼容性**：f-string 内嵌套双引号（`f"...{pc.get("currency","CNY")}..."`）在 Python 3.12 之前报 `SyntaxError: unmatched '('`，共 4 处改为单引号
+
 ## v2.6.3 (2026-05-24)
 
 ### 修复
