@@ -116,29 +116,46 @@ API 返回 usage → Agent 写入本地 → token-stats 读取汇总
 
 ## 安装
 
-环境就绪后，执行以下命令完成安装：
+安装到用户主目录 `~/token-stats/`（所有系统都有写入权限，相当于全局安装）：
 
 **macOS / Linux：**
 ```bash
-cd ~
-clawhub install agent-usage-stats
-python3 ~/skills/agent-usage-stats/token-stats.py setup
+git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
+python3 ~/token-stats/token-stats.py setup
 ```
 
 **Windows（PowerShell）：**
 ```powershell
-cd ~
-clawhub install agent-usage-stats
-python $HOME\skills\agent-usage-stats\token-stats.py setup
+git clone https://github.com/zhouhaoyong/token-stats.git $HOME\token-stats
+python $HOME\token-stats\token-stats.py setup
 ```
 
-> `cd ~` 确保技能安装到用户主目录（所有系统都有写入权限）。
+> 没有 git？也可以从 [GitHub Releases](https://github.com/zhouhaoyong/token-stats/releases) 下载 ZIP 解压到 `~/token-stats/`。
 > 如果 `python` 找不到，试试 `python3`（Microsoft Store 版 Python 用 `python3`）。
 > 如果报错 `can't open file '...~...'`，参考：[PowerShell 路径展开问题](#ps-tilde)。
 >
 > `setup` 会自动将 `~/.local/bin` 加入系统 PATH，**需要新开一个终端窗口**才能生效。
 
 安装完成后，新开终端即可使用 `token-stats` 命令。
+
+### 更新
+
+根据安装方式选择对应的更新方法：
+
+**方式一：git clone 安装**（推荐）
+```bash
+cd ~/token-stats && git pull
+```
+> 更新后 `setup` 创建的包装器（`~/.local/bin/token-stats`）自动指向最新文件，无需重新 setup。
+
+**方式二：ClawHub 安装**
+```bash
+token-stats update
+```
+> 内部调用 `clawhub update agent-usage-stats`，拉取新版本后复制到安装目录。
+
+> **ClawHub 用户**也可通过 `clawhub install agent-usage-stats --dir ~` 安装，然后执行
+> `python3 ~/skills/agent-usage-stats/token-stats.py setup`。
 
 ### 验证安装成功
 
@@ -761,17 +778,17 @@ python: can't open file 'C:\\Users\\xxx\\~\\skills\\...': No such file or direct
 **解决：用 `$HOME` 替代 `~`：**
 ```powershell
 # ❌ 错误
-python ~\skills\agent-usage-stats\token-stats.py setup
+python ~\token-stats\token-stats.py setup
 
 # ✅ 正确
-python $HOME\skills\agent-usage-stats\token-stats.py setup
+python $HOME\token-stats\token-stats.py setup
 ```
 
 > `$HOME` 是 PowerShell 内置变量，始终展开为当前用户目录。
 
 #### ❓ `token-stats` 命令找不到
 
-**原因 1：还没执行 `setup`** → 按上方安装指引执行 `python $HOME\skills\...\token-stats.py setup`（Windows）或 `python3 ~/skills/.../token-stats.py setup`（macOS/Linux）。
+**原因 1：还没执行 `setup`** → 按上方安装指引执行 `python $HOME\token-stats\token-stats.py setup`（Windows）或 `python3 ~/token-stats/token-stats.py setup`（macOS/Linux）。
 
 **原因 2：执行了 `setup` 但没新开终端** → `setup` 已将 PATH 写入系统配置，但当前终端不生效，新开一个终端即可。
 
@@ -801,7 +818,7 @@ $env:PATH += ';' + "$env:USERPROFILE\.local\bin"
 ```bash
 chmod +x ~/.local/bin/token-stats
 # 或者重新执行 setup
-python3 ~/skills/agent-usage-stats/token-stats.py setup
+python3 ~/token-stats/token-stats.py setup
 ```
 
 > Windows 用户不受此问题影响（`.cmd` 文件不需要执行权限）。

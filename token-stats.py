@@ -32,9 +32,9 @@ token-stats — 选个 Agent 看它的 token 消耗
   token-stats -a hermes --detail
 
 安装:
-  clawhub install agent-usage-stats
-  token-stats setup              创建全局命令并自动加入 PATH
-  token-stats --uninstall         删除全局命令并清理 PATH
+  git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
+  python3 ~/token-stats/token-stats.py setup    创建全局命令并自动加入 PATH
+  token-stats --uninstall                        删除全局命令并清理 PATH
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.7"
+VERSION = "2.6.8"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -4591,11 +4591,12 @@ def main():
     token-stats --all                 查看本机所有 Agent 统计
     token-stats --list-backends       列出已安装的 Agent
 
-  安装与卸载:
-    clawhub install agent-usage-stats  从 ClawHub 安装
-    token-stats --setup                创建全局命令 + 自动加入 PATH
-    token-stats --uninstall            删除全局命令 + 自动清理 PATH
-    token-stats update                 通过 clawhub update 更新到最新版本
+  安装与更新:
+    git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
+    python3 ~/token-stats/token-stats.py setup    创建全局命令 + 自动加入 PATH
+    cd ~/token-stats && git pull                   更新（git 用户）
+    token-stats update                             更新（ClawHub 用户）
+    token-stats --uninstall                        删除全局命令 + 自动清理 PATH
         """,
     )
     parser.add_argument("-v", "--version", action="store_true", help="显示版本号")
@@ -4829,9 +4830,10 @@ def main():
                 print(f"⚠️ 更新可能失败 (exit {result.returncode})，请手动执行: clawhub update agent-usage-stats")
                 return
 
-            # 搜索 ClawHub 安装的新文件（不同平台/版本路径可能不同）
+            # 搜索已安装的新文件（不同平台/版本路径可能不同）
             script_dir = os.path.dirname(os.path.abspath(__file__))
             search_dirs = [
+                script_dir,  # 当前脚本所在目录（如 ~/token-stats/）
                 os.path.join(script_dir, "skills", "agent-usage-stats"),
                 os.path.join(os.path.expanduser("~"), "skills", "agent-usage-stats"),
                 os.path.join(os.path.expanduser("~"), ".clawhub", "skills", "agent-usage-stats"),

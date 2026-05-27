@@ -78,29 +78,46 @@ clawhub -V          # show version
 
 ## Install
 
-After meeting the requirements above, two commands:
+Install to `~/token-stats/` in your home directory (writable on all OSes, works like a global install):
 
 **macOS / Linux:**
 ```bash
-cd ~
-clawhub install agent-usage-stats
-python3 ~/skills/agent-usage-stats/token-stats.py setup
+git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
+python3 ~/token-stats/token-stats.py setup
 ```
 
 **Windows (PowerShell):**
 ```powershell
-cd ~
-clawhub install agent-usage-stats
-python $HOME\skills\agent-usage-stats\token-stats.py setup
+git clone https://github.com/zhouhaoyong/token-stats.git $HOME\token-stats
+python $HOME\token-stats\token-stats.py setup
 ```
 
-> `cd ~` ensures the skill installs to your home directory (always writable on all OSes).
+> No git? Download the ZIP from [GitHub Releases](https://github.com/zhouhaoyong/token-stats/releases) and extract to `~/token-stats/`.
 > If `python` is not found, try `python3` (Microsoft Store Python uses `python3`).
 > If you get `can't open file '...~...'`, see: [PowerShell path expansion](#ps-tilde).
 >
 > `setup` automatically adds `~/.local/bin` to your system PATH. **Open a new terminal** for it to take effect.
 
 That's it. Open a new terminal and run `token-stats`.
+
+### Update
+
+Choose the update method that matches your install method:
+
+**Option 1: git clone install** (recommended)
+```bash
+cd ~/token-stats && git pull
+```
+> The wrapper (`~/.local/bin/token-stats`) created by `setup` points to the live files — no re-setup needed after pulling.
+
+**Option 2: ClawHub install**
+```bash
+token-stats update
+```
+> This runs `clawhub update agent-usage-stats` internally, then copies updated files into your install directory.
+
+> **ClawHub users** can also install via `clawhub install agent-usage-stats --dir ~`, then run
+> `python3 ~/skills/agent-usage-stats/token-stats.py setup`.
 
 ### Verify Installation
 
@@ -587,10 +604,10 @@ python: can't open file 'C:\\Users\\xxx\\~\\skills\\...': No such file or direct
 **Fix: use `$HOME` instead of `~`:**
 ```powershell
 # ❌ Wrong
-python ~\skills\agent-usage-stats\token-stats.py setup
+python ~\token-stats\token-stats.py setup
 
 # ✅ Correct
-python $HOME\skills\agent-usage-stats\token-stats.py setup
+python $HOME\token-stats\token-stats.py setup
 ```
 
 > `$HOME` is a built-in PowerShell variable that always expands to the current user directory.
@@ -627,7 +644,7 @@ $env:PATH += ';' + "$env:USERPROFILE\.local\bin"
 ```bash
 chmod +x ~/.local/bin/token-stats
 # Or just re-run setup
-python3 ~/skills/agent-usage-stats/token-stats.py setup
+python3 ~/token-stats/token-stats.py setup
 ```
 
 > Windows users are not affected (`.cmd` files don't need execute permission).
@@ -684,13 +701,12 @@ token-stats -a hermes --export
 
 **Fix for all OSes:**
 ```bash
-cd ~
-clawhub install agent-usage-stats --force
-python3 ~/skills/agent-usage-stats/token-stats.py setup   # Windows: python $HOME\skills\...
+git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
+python3 ~/token-stats/token-stats.py setup   # Windows: python $HOME\token-stats\...
 token-stats --version
 ```
 
-This ensures the skill is installed to `~/skills/` — the predictable home-directory location.
+This ensures the tool is installed to `~/token-stats/` — the predictable home-directory location.
 
 #### ❓ OpenClaw shows calls but zero tokens
 

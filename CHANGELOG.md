@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.6.8 (2026-05-27)
+
+### 变更
+
+- **安装路径统一为 `~/token-stats/`**：不再依赖 ClawHub 的 `~/skills/` 路径。默认使用 `git clone` 到用户主目录，更简单可预测
+- **安装文档重写**：README / SKILL.md 区分 git clone 和 ClawHub 两种安装/更新方式，各写清楚
+
+### 修复
+
+- **`update` 搜索路径**：新增脚本所在目录（如 `~/token-stats/`）到搜索列表，支持 git clone 安装后的文件更新检测
+
 ## v2.6.7 (2026-05-27)
 
 ### 新增
