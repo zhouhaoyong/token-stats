@@ -66,5 +66,5 @@ run: token-stats -a hermes
 |-------|-----------|
 | Hermes | `~/.hermes/state.db` → sessions 表 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
-| CodeX | `~/.codex/state_*.sqlite` → threads 表 |
+| CodeX | `~/.codex/state_*.sqlite` + `~/.codex/sessions/**/*.jsonl` |
 | OpenClaw | `~/.openclaw/agents/main/sessions/` |
