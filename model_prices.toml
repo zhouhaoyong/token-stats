@@ -88,6 +88,31 @@ output_price = 16.0
 #   gpt-5.4: $2.5/$15.0 per 1M
 #   gpt-4.1: $1.0/$8.0 per 1M
 
+# CodeX 使用的 GPT 模型（通过 API Key 调用，非订阅制）
+["gpt-5.5"]
+provider = "OpenAI (CodeX)"
+currency = "USD"
+input_cache_price = 2.5
+input_no_cache_price = 5.0
+output_price = 30.0
+note = "2026.4 定价; 缓存价格按输入 50% 估算"
+
+["gpt-5.4"]
+provider = "OpenAI (CodeX)"
+currency = "USD"
+input_cache_price = 1.25
+input_no_cache_price = 2.5
+output_price = 15.0
+note = "2026.4 定价; 缓存价格按输入 50% 估算"
+
+[codex-auto-review]
+provider = "CodeX"
+currency = "USD"
+input_cache_price = 0.0
+input_no_cache_price = 0.0
+output_price = 0.0
+note = "CodeX 内置审查子 agent，不单独计费"
+
 # ── Anthropic ─────────────────────────────────────────────
 # 来源: Anthropic 官方定价页 2026.5
 

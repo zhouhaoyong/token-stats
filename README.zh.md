@@ -108,7 +108,7 @@ API 返回 usage → Agent 写入本地 → token-stats 读取汇总
 |-------|---------|:---:|
 | Reasonix | `cacheHitTokens` + `cacheMissTokens` 均已知 | 精确 |
 | Claude Code / Hermes / OpenClaw | `cache_read_input_tokens`（无 creation） | 近似(偏保守) |
-| CodeX / DeepSeek TUI | 无缓存数据 | 不展示 |
+| CodeX / DeepSeek TUI | 有缓存数据（CodeX 从 session JSONL 读取） | 精确/无数据 |
 
 - `cache = 0` 时不展示缓存率
 - 对于 Anthropic API，`input_tokens` 包含不参与缓存的 tokens，实际命中率略高于展示值
@@ -631,7 +631,7 @@ clawhub uninstall agent-usage-stats
 | Agent | 当前快照 | 时间段 |
 |-------|---------|--------|
 | **Claude Code** | 总计 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
-| **CodeX** | 总计 + 线程数 | 同左 |
+| **CodeX** | 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
 | **Hermes** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 会话数 |
 | **OpenClaw** | 上下文占比 + 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 总计 + 调用数 |
 | **Reasonix** | 输入/输出/缓存 + 调用次数 + 缓存率 + 预估费用 | 同左 |
@@ -644,7 +644,7 @@ clawhub uninstall agent-usage-stats
 | Agent | 数据读哪里 |
 |-------|-----------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
-| CodeX | `~/.codex/state_*.sqlite` → threads 表 |
+| CodeX | `~/.codex/state_*.sqlite` → threads 表 + `~/.codex/sessions/**/*.jsonl` → token_count 事件 |
 | Hermes | `~/.hermes/state.db` → sessions 表 |
 | OpenClaw | `~/.openclaw/agents/main/sessions/` |
 | Reasonix | `~/.reasonix/usage.jsonl` |

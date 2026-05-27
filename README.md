@@ -421,7 +421,7 @@ clawhub uninstall agent-usage-stats
 |-------|----------|------------|
 | **Hermes** | Context % + input/output/cache + calls + session count | Total + session count |
 | **Claude Code** | Total + input/output/cache + calls + sub-agents/projects | Same |
-| **CodeX** | Total + thread count | Same |
+| **CodeX** | Input/output/cache + calls + cache rate + estimated cost | Same |
 | **OpenClaw** | Context % + input/output/cache + calls | Total + calls |
 
 ### Data sources
@@ -430,7 +430,7 @@ clawhub uninstall agent-usage-stats
 |-------|-----------|
 | Hermes | `~/.hermes/state.db` → sessions table |
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
-| CodeX | `~/.codex/state_*.sqlite` → threads table |
+| CodeX | `~/.codex/state_*.sqlite` → threads table + `~/.codex/sessions/**/*.jsonl` → token_count events |
 | OpenClaw | `~/.openclaw/agents/main/sessions/` |
 
 ### Windows + WSL2

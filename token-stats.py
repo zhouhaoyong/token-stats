@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-VERSION = "2.6.6"
+VERSION = "2.6.7"
 
 # 强制 stdout 行缓冲 + UTF-8，使 --watch 模式的输出实时可见
 try:
@@ -1053,7 +1053,7 @@ class AgentData:
     stats: dict
     raw: str
     per_model: list = None  # [{"model": ..., "input": N, "output": N, "calls": N, "cache": N}, ...]
-    token_mode: str = "split"  # "split" = 区分入/出, "total" = 仅有总计（CodeX）
+    token_mode: str = "split"  # "split" = 区分入/出, "total" = 仅有总计（回退/WSL）
 
 
 class BaseAgent(ABC):
@@ -1079,6 +1079,9 @@ class BaseAgent(ABC):
 
     def watch(self, interval: int = 5) -> None:
         """实时监控模式"""
+        # 保护：interval 至少 1 秒，防止负数或零导致疯转
+        if interval < 1:
+            interval = 5
         stop_event = threading.Event()
 
         def _on_signal(sig, frame):
@@ -2102,6 +2105,97 @@ class ClaudeCodeAgent(BaseAgent):
 #  CodeX
 # ═══════════════════════════════════════════════════
 
+# JSONL parse cache: {rollout_path: (mtime, {"input": N, "output": N, "cache": N, "calls": N})}
+_codex_jsonl_cache = {}
+
+
+def _parse_codex_session_jsonl(rollout_path, from_ts=None, to_ts=None):
+    """解析 CodeX session JSONL 文件，提取 token 消耗（含 I/O 拆分和调用次数）。
+
+    返回 {"input": N, "output": N, "cache": N, "calls": N} 或 None（解析失败）。
+    calls = session 中的 token_count 事件数（即 API 调用次数）。
+    - 无时间过滤：使用最后一个 token_count 事件的 total_token_usage
+    - 有时间过滤：累加范围内各事件的 last_token_usage
+    """
+    if not rollout_path or not os.path.exists(rollout_path):
+        return None
+
+    mtime = os.path.getmtime(rollout_path)
+    cache_key = rollout_path
+
+    # 无过滤时查缓存
+    if from_ts is None and to_ts is None:
+        if cache_key in _codex_jsonl_cache:
+            cached_mtime, cached_data = _codex_jsonl_cache[cache_key]
+            if cached_mtime == mtime:
+                return dict(cached_data)
+
+    try:
+        with open(rollout_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return None
+
+    token_events = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            obj.get("type") == "event_msg"
+            and obj.get("payload", {}).get("type") == "token_count"
+        ):
+            token_events.append(obj)
+
+    if not token_events:
+        return None
+
+    if from_ts is not None or to_ts is not None:
+        result = {"input": 0, "output": 0, "cache": 0, "calls": 0}
+        for evt in token_events:
+            ts_str = evt.get("timestamp", "")
+            if not ts_str:
+                continue
+            try:
+                evt_ts = datetime.fromisoformat(
+                    ts_str.replace("Z", "+00:00")
+                ).timestamp()
+            except Exception:
+                continue
+            if from_ts is not None and evt_ts < from_ts:
+                continue
+            if to_ts is not None and evt_ts > to_ts:
+                continue
+            usage = evt["payload"]["info"]["last_token_usage"]
+            inp_total = usage.get("input_tokens", 0)
+            cache_tok = usage.get("cached_input_tokens", 0)
+            out_tok = usage.get("output_tokens", 0) + usage.get(
+                "reasoning_output_tokens", 0
+            )
+            result["input"] += inp_total - cache_tok
+            result["cache"] += cache_tok
+            result["output"] += out_tok
+            result["calls"] += 1
+        return result if any(v > 0 for v in result.values()) else None
+
+    # 无过滤：用最后一个 token_count 的 total_token_usage
+    usage = token_events[-1]["payload"]["info"]["total_token_usage"]
+    inp_total = usage.get("input_tokens", 0)
+    cache_tok = usage.get("cached_input_tokens", 0)
+    out_tok = usage.get("output_tokens", 0) + usage.get(
+        "reasoning_output_tokens", 0
+    )
+    result = {
+        "input": inp_total - cache_tok,
+        "output": out_tok,
+        "cache": cache_tok,
+        "calls": len(token_events),
+    }
+    _codex_jsonl_cache[cache_key] = (mtime, dict(result))
+    return result
+
+
 def _find_codex_db() -> Optional[str]:
     """获取 CodeX 数据库路径，优先从配置读取"""
     cfg = _load_agent_paths()
@@ -2137,10 +2231,7 @@ class CodeXAgent(BaseAgent):
     def detect() -> bool:
         db = _find_codex_db()
         if db is not None:
-            if os.path.isdir(db) or os.path.exists(db):
-                return True
-            native = os.path.join(os.path.expanduser("~"), ".codex")
-            return db != native
+            return os.path.exists(db)
         return False
 
     def _codex_wsl_fallback(self, db, from_ts, to_ts):
@@ -2173,7 +2264,7 @@ class CodeXAgent(BaseAgent):
         if not db:
             return AgentData(
                 name="codex", display_name="CodeX",
-                stats={}, raw="CodeX: 未检测到数据库文件", token_mode="total"
+                stats={}, raw="CodeX: 未检测到数据库文件", token_mode="split"
             )
         # WSL UNC 路径跳过直连
         if _is_wsl_unc(db):
@@ -2182,116 +2273,82 @@ class CodeXAgent(BaseAgent):
             conn = sqlite3.connect(db, timeout=5)
             conn.row_factory = sqlite3.Row
 
-            if from_ts is not None or to_ts is not None:
-                where = []
-                params = []
-                if from_ts is not None:
-                    where.append("updated_at >= ?")
-                    params.append(int(from_ts))
-                if to_ts is not None:
-                    where.append("updated_at <= ?")
-                    params.append(int(to_ts))
-                clause = " AND ".join(where)
-
-                cur = conn.execute(
-                    f"SELECT model, model_provider, SUM(tokens_used) as tokens, COUNT(*) as cnt "
-                    f"FROM threads WHERE {clause} GROUP BY model, model_provider",
-                    params
-                )
-                rows = cur.fetchall()
-                conn.close()
-
-                if not rows:
-                    return AgentData(
-                        name="codex", display_name="CodeX",
-                        stats={}, raw="CodeX: 该时间段内无会话记录", token_mode="total"
-                    )
-
-                per_model_list = []
-                raw_lines = ["📊 CodeX"]
-                total_tok = 0
-                total_cnt = 0
-                for r in rows:
-                    model = r["model"] or r["model_provider"] or "codex-default"
-                    ts = r["tokens"] or 0
-                    cnt = r["cnt"] or 0
-                    per_model_list.append({"model": model, "input": ts, "output": 0,
-                                            "calls": cnt, "cache": 0})
-                    # CodeX 不区分输入/输出，仅显示总计；thread=session
-                    if ts > 0 or cnt > 0:
-                        parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
-                        parts.append(f"{cnt} 轮会话")
-                        raw_lines.append(f"  {model} | {' | '.join(parts)}")
-                    total_tok += ts
-                    total_cnt += cnt
-
-                raw = "\n".join(raw_lines)
-                stats = {
-                    "model": ", ".join(sorted({r["model"] or "unknown" for r in rows if r["model"]})),
-                    "total_tokens": total_tok,
-                    "session_count": total_cnt,
-                }
-                return AgentData(name="codex", display_name="CodeX",
-                                 stats=stats, raw=raw, per_model=per_model_list, token_mode="total")
-
-            # ── 默认：汇总所有线程（按模型） ──
-            cur = conn.execute(
-                "SELECT model, model_provider, SUM(tokens_used) as tokens, COUNT(*) as cnt "
-                "FROM threads GROUP BY model, model_provider"
-            )
-            rows = cur.fetchall()
-
-            cur2 = conn.execute("SELECT COUNT(*) as cnt FROM threads")
-            total_sessions = cur2.fetchone()["cnt"] or 0
+            # 查询线程，按 updated_at 做粗筛
+            where_parts = ["tokens_used > 0"]
+            params = []
+            if from_ts is not None:
+                where_parts.append("updated_at >= ?")
+                params.append(int(from_ts))
+            if to_ts is not None:
+                where_parts.append("updated_at <= ?")
+                params.append(int(to_ts))
+            query = f"SELECT id, model, model_provider, tokens_used, rollout_path, updated_at FROM threads WHERE {' AND '.join(where_parts)}"
+            thread_rows = conn.execute(query, params).fetchall()
             conn.close()
 
-            if not rows:
+            # 按模型聚合（仅按 model 分组，合并不同 provider）
+            per_model: dict[str, dict[str, int]] = {}
+            total_sessions = 0
+
+            for tr in thread_rows:
+                model = tr["model"] or tr["model_provider"] or "codex-default"
+                rollout = tr["rollout_path"]
+
+                # 尝试从 session JSONL 读取 I/O 拆分
+                jd = _parse_codex_session_jsonl(rollout, from_ts, to_ts)
+
+                if jd:
+                    if model not in per_model:
+                        per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                    per_model[model]["input"] += jd["input"]
+                    per_model[model]["output"] += jd["output"]
+                    per_model[model]["cache"] += jd["cache"]
+                    per_model[model]["calls"] += jd.get("calls", 1)
+                    total_sessions += 1
+                else:
+                    # 回退：使用 tokens_used 作为总计
+                    ts = tr["tokens_used"] or 0
+                    if ts <= 0:
+                        continue
+                    if model not in per_model:
+                        per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                    per_model[model]["input"] += ts
+                    per_model[model]["calls"] += 1
+                    total_sessions += 1
+
+            if not per_model:
                 return AgentData(
                     name="codex", display_name="CodeX",
-                    stats={}, raw="CodeX: 尚无会话记录", token_mode="total"
+                    stats={}, raw="CodeX: 该时间段内无会话记录", token_mode="split"
                 )
 
             per_model_list = []
-            raw_lines = ["📊 CodeX"]
-            total_tok = 0
-            total_cnt = 0
-            model_count = 0
-            for r in rows:
-                model = r["model"] or r["model_provider"] or "codex-default"
-                ts = r["tokens"] or 0
-                cnt = r["cnt"] or 0
-                per_model_list.append({"model": model, "input": ts, "output": 0,
-                                        "calls": cnt, "cache": 0})
-                # CodeX 不区分输入/输出，仅显示总计；thread=session
-                if ts > 0 or cnt > 0:
-                    parts = [f"总计 {fmt_num(ts)}"] if ts > 0 else []
-                    parts.append(f"{cnt} 轮会话")
-                    raw_lines.append(f"  {model} | {' | '.join(parts)}")
-                    model_count += 1
-                total_tok += ts
-                total_cnt += cnt
+            for model, data in per_model.items():
+                per_model_list.append({
+                    "model": model,
+                    "input": data["input"],
+                    "output": data["output"],
+                    "calls": data["calls"],
+                    "cache": data["cache"],
+                })
 
-            # ── 合计（多模型时显示） ──
-            if model_count > 1:
-                raw_lines.append(f"  {'─' * 36}")
-                raw_lines.append(f"  合计 | 总计 {fmt_num(total_tok)} | {total_cnt} 轮会话")
+            has_jsonl_data = any(pm["output"] > 0 for pm in per_model_list)
+            raw = _build_aligned_raw("CodeX", per_model_list)
 
-            if len(rows) == 1 and total_sessions > rows[0]["cnt"]:
-                raw_lines[-1] = raw_lines[-1].rstrip() + f" | 共 {total_sessions} 次会话"
-
-            raw = "\n".join(raw_lines)
             stats = {
-                "model": ", ".join(sorted({r["model"] or "unknown" for r in rows if r["model"]})),
-                "total_tokens": total_tok,
+                "model": ", ".join(sorted(per_model.keys())),
+                "total_tokens": sum(pm["input"] + pm["output"] for pm in per_model_list),
                 "session_count": total_sessions,
             }
+            # 有 JSONL 数据时用 split 模式（I/O 拆分），否则标记为 total（回退）
+            token_mode = "split" if has_jsonl_data else "total"
             return AgentData(name="codex", display_name="CodeX",
-                             stats=stats, raw=raw, per_model=per_model_list, token_mode="total")
+                             stats=stats, raw=raw, per_model=per_model_list, token_mode=token_mode)
 
         except Exception as e:
             return AgentData(
                 name="codex", display_name="CodeX",
-                stats={}, raw=f"CodeX: 读取失败 — {e}", token_mode="total"
+                stats={}, raw=f"CodeX: 读取失败 — {e}", token_mode="split"
             )
 
 
@@ -4545,7 +4602,14 @@ def main():
     parser.add_argument("-l", "--list-backends", action="store_true", help="列出本机已安装的 Agent")
     parser.add_argument("--list-prices", action="store_true", help="列出 model_prices.toml 中已配置价格的模型")
     parser.add_argument("-a", "--agent", help="直接指定 Agent: claude-code/codex/hermes/openclaw/reasonix/deepseek-tui")
-    parser.add_argument("-w", "--watch", nargs="?", type=int, const=5, default=None, metavar="秒",
+
+    def _positive_int(val):
+        ival = int(val)
+        if ival < 1:
+            raise argparse.ArgumentTypeError(f"监控间隔必须 ≥1 秒，收到: {val}")
+        return ival
+
+    parser.add_argument("-w", "--watch", nargs="?", type=_positive_int, const=5, default=None, metavar="秒",
                         help="实时监控模式（默认每 5 秒轮询）")
     parser.add_argument("setup_pos", nargs="?", const=True, help=argparse.SUPPRESS)
 

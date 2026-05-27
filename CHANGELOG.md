@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.6.7 (2026-05-27)
+
+### 新增
+
+- **CodeX I/O 拆分**：从 session JSONL（`~/.codex/sessions/**/*.jsonl`）读取 `token_count` 事件，提取 `input_tokens`/`cached_input_tokens`/`output_tokens`/`reasoning_output_tokens` 完整拆分，CodeX 从 `token_mode="total"` 切换为 `"split"`，与 Claude Code 等行为一致
+- **CodeX 调用次数修正**：现在统计 `token_count` 事件数（即实际 API 调用次数），而非 session 数
+- **CodeX 模型价格**：`model_prices.toml` 新增 `gpt-5.5`（$5.0/$30.0）、`gpt-5.4`（$2.5/$15.0）、`codex-auto-review`（$0）
+
+### 修复
+
+- **CodeX watch 模式疯转**：`-w -5` 等负 interval 导致循环不休眠。`watch()` 入口添加 `interval < 1` 下限保护，argparse 添加 `_positive_int` 校验拒绝 ≤0 的间隔
+- **CodeX 模型名重复**：SQL 按 `(model, model_provider)` 分组导致同模型显示多行。改为仅按 `model` 聚合，合并不同 provider 的数据
+- **CodeX 零 token 会话**：`tokens_used = 0` 的无效会话不再显示
+- **CodeX detect() 假阳性**：数据库文件不存在时不再错误返回 True
+- **watch 模式今日计算**：CodeX 切换为 `split` 模式后，`--today` 通过事件时间戳精确过滤，不再使用 watch 启动时刻的基线差分
+
+### 内部
+
+- 新增 `_parse_codex_session_jsonl()`：解析 CodeX session JSONL，含 mtime 缓存以优化 watch 模式性能
+- 重写 `CodeXAgent.collect()`：混合 threads 表（元数据）+ JSONL（I/O 拆分），时间过滤在 SQL + JSONL 事件层双重保障
+- 新增 `_codex_jsonl_cache`：按文件 mtime 缓存已解析数据
+
 ## v2.6.6 (2026-05-25)
 
 ### 修复
