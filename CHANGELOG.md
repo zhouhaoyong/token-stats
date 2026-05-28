@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.7.5 (2026-05-29)
+
+### 修复
+
+- **ClawHub 实际安装路径识别**：`update` 会解析 ClawHub 输出中的真实安装目录，例如 `.../.local/bin/skills/agent-usage-stats`，避免在非 home 目录执行更新后仍停留在旧版本
+- **更新源搜索补齐**：新增当前目录和旧命令目录下的 `skills/agent-usage-stats` 搜索，覆盖 macOS、Linux、WSL2 中从不同目录运行 `token-stats update` 的情况
+- **卸载清理补齐**：`--uninstall` 会同时清理误装到旧命令目录下的 ClawHub 技能目录，避免后续重装残留
+
 ## v2.7.4 (2026-05-29)
 
 ### 修复

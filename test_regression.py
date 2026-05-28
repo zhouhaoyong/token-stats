@@ -218,8 +218,21 @@ class Runner:
             legacy_clawhub_skill_dir = home / ".clawhub" / "skills" / "agent-usage-stats"
             legacy_clawhub_skill_dir.mkdir(parents=True, exist_ok=True)
             (legacy_clawhub_skill_dir / "token-stats.py").write_text("VERSION = \"0.0.1\"\n", encoding="utf-8")
+            local_bin_skill_dir = local_bin / "skills" / "agent-usage-stats"
+            local_bin_skill_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SCRIPT, local_bin_skill_dir / "token-stats.py")
+            shutil.copytree(ROOT / "token_stats", local_bin_skill_dir / "token_stats")
+            shutil.copy2(ROOT / "model_prices.toml", local_bin_skill_dir / "model_prices.toml")
             fake_clawhub = fake_bin / "clawhub"
-            fake_clawhub.write_text("#!/bin/sh\necho \"fake clawhub $@\"\nexit 0\n", encoding="utf-8")
+            fake_clawhub.write_text(
+                "#!/bin/sh\n"
+                "echo \"fake clawhub $@\"\n"
+                "if [ \"$1\" = \"install\" ]; then\n"
+                f"  echo \"✔ OK. Installed agent-usage-stats -> {local_bin_skill_dir}\"\n"
+                "fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
             fake_clawhub.chmod(0o755)
             env = {
                 "HOME": str(home),
@@ -267,7 +280,13 @@ class Runner:
                 "update_repairs_wrapper",
                 PY + [SCRIPT, "update"],
                 env=env,
-                expect=["fake clawhub update agent-usage-stats", "已检查全局命令", "已迁移旧版全局命令", "hash -r"],
+                expect=[
+                    "fake clawhub update agent-usage-stats",
+                    f"Installed agent-usage-stats -> {local_bin_skill_dir}",
+                    "已检查全局命令",
+                    "已迁移旧版全局命令",
+                    "hash -r",
+                ],
             )
             if not wrapper.exists():
                 self.failures.append("update_repairs_wrapper: wrapper was not repaired")
@@ -301,6 +320,8 @@ class Runner:
                 self.failures.append("uninstall_temp_home: ClawHub skill dir still exists")
             if legacy_clawhub_skill_dir.exists():
                 self.failures.append("uninstall_temp_home: legacy ClawHub skill dir still exists")
+            if local_bin_skill_dir.exists():
+                self.failures.append("uninstall_temp_home: local-bin ClawHub skill dir still exists")
             if sys.platform != "win32" and "token-stats PATH" in zshrc.read_text(encoding="utf-8"):
                 self.failures.append("uninstall_temp_home: PATH block still exists")
             if sys.platform != "win32" and "token-stats PATH" in bashrc.read_text(encoding="utf-8"):

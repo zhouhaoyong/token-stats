@@ -122,6 +122,7 @@ def run_update(project_root: str, version: str, install_dir_arg: str | None):
 
     try:
         old_ver = version
+        clawhub_paths = []
         result = subprocess.run(
             [clawhub_exe, "update", "agent-usage-stats", "--no-input"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -130,13 +131,14 @@ def run_update(project_root: str, version: str, install_dir_arg: str | None):
         output = result.stdout.decode("utf-8", errors="ignore").strip()
         if output:
             print(output)
+            clawhub_paths.extend(file_manager.parse_clawhub_install_paths(output))
 
         if result.returncode != 0:
             print(f"⚠️ ClawHub 更新失败 (exit {result.returncode})，已保留当前版本。")
             _print_clawhub_recovery()
             return
 
-        search_dirs = file_manager.find_update_sources(project_root, install_dir)
+        search_dirs = _update_search_dirs(project_root, install_dir, clawhub_paths)
         updated_src = _find_newer_source(search_dirs, old_ver)
 
         if updated_src is None:
@@ -149,11 +151,12 @@ def run_update(project_root: str, version: str, install_dir_arg: str | None):
             out2 = result2.stdout.decode("utf-8", errors="ignore").strip()
             if out2:
                 print(out2)
+                clawhub_paths.extend(file_manager.parse_clawhub_install_paths(out2))
             if result2.returncode != 0:
                 print(f"⚠️ ClawHub 强制重装失败 (exit {result2.returncode})，已保留当前版本。")
                 _print_clawhub_recovery()
                 return
-            search_dirs = file_manager.find_update_sources(project_root, install_dir)
+            search_dirs = _update_search_dirs(project_root, install_dir, clawhub_paths)
             updated_src = _find_newer_source(search_dirs, old_ver)
 
         if updated_src:
@@ -190,6 +193,21 @@ def _find_newer_source(search_dirs, old_ver: str):
         if ver and _version_tuple(ver) > _version_tuple(old_ver):
             return item
     return None
+
+
+def _update_search_dirs(project_root: str, install_dir: str, clawhub_paths: list[str]):
+    dirs = []
+    dirs.extend(clawhub_paths)
+    dirs.extend(file_manager.find_update_sources(project_root, install_dir))
+    seen = set()
+    out = []
+    for item in dirs:
+        norm = os.path.normcase(os.path.abspath(os.path.expanduser(item)))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(item)
+    return out
 
 
 def _version_tuple(value: str):

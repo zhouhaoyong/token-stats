@@ -54,10 +54,14 @@ def install_entry_script(install_dir: str):
 
 def legacy_install_dirs(project_root: str):
     home = os.path.expanduser("~")
+    cwd = os.getcwd()
+    legacy_bin_parent = legacy_bin_dir()
     candidates = [
         os.path.join(home, "token-stats"),
         os.path.join(home, "skills", "agent-usage-stats"),
         os.path.join(home, ".clawhub", "skills", "agent-usage-stats"),
+        os.path.join(cwd, "skills", "agent-usage-stats"),
+        os.path.join(legacy_bin_parent, "skills", "agent-usage-stats"),
         os.path.join(project_root, "skills", "agent-usage-stats"),
     ]
     seen = set()
@@ -322,6 +326,27 @@ def find_update_sources(project_root: str, install_dir: str):
         seen.add(norm)
         out.append(item)
     return out
+
+
+def parse_clawhub_install_paths(output: str):
+    """Extract skill install directories printed by ClawHub."""
+    paths = []
+    if not output:
+        return paths
+    patterns = [
+        r"Installed\s+agent-usage-stats\s+->\s+(.+)",
+        r"agent-usage-stats:\s+updated\s+->\s+(.+)",
+    ]
+    for line in output.splitlines():
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if not match:
+                continue
+            value = match.group(1).strip().strip("\"'")
+            if not value or re.fullmatch(r"\d+(?:\.\d+)*", value):
+                continue
+            paths.append(os.path.abspath(os.path.expanduser(value)))
+    return paths
 
 
 def remove_install_dirs(install_dir: str, project_root: str):
