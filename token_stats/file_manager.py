@@ -54,7 +54,7 @@ def install_entry_script(install_dir: str):
 
 def legacy_install_dirs(project_root: str):
     home = os.path.expanduser("~")
-    cwd = os.getcwd()
+    cwd = safe_getcwd()
     legacy_bin_parent = legacy_bin_dir()
     candidates = [
         os.path.join(home, "token-stats"),
@@ -349,9 +349,38 @@ def parse_clawhub_install_paths(output: str):
     return paths
 
 
+def maintenance_dirs(project_root: str, install_dir: str, *, include_install_dir: bool = True):
+    candidates = []
+    if include_install_dir:
+        candidates.append(resolve_install_dir(install_dir))
+    candidates.extend(legacy_install_dirs(project_root))
+    seen = set()
+    out = []
+    for item in candidates:
+        path = os.path.abspath(os.path.expanduser(item))
+        norm = os.path.normcase(path)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(path)
+    return out
+
+
+def current_dir_inside(paths):
+    cwd = os.path.abspath(safe_getcwd())
+    for item in paths:
+        path = os.path.abspath(os.path.expanduser(item))
+        if _same_or_child(cwd, path):
+            return path
+    skill_dir = _skill_dir_from_path(cwd)
+    if skill_dir:
+        return skill_dir
+    return None
+
+
 def remove_install_dirs(install_dir: str, project_root: str):
     """Remove the active install dir and legacy ClawHub/source install dirs."""
-    cwd = os.getcwd()
+    cwd = safe_getcwd()
     removed = []
     skipped = []
     failed = []
@@ -384,7 +413,29 @@ def remove_install_dirs(install_dir: str, project_root: str):
 
 
 def _same_path(a: str, b: str):
-    return os.path.normcase(os.path.normpath(os.path.abspath(a))) == os.path.normcase(os.path.normpath(os.path.abspath(b)))
+    return os.path.normcase(os.path.normpath(os.path.realpath(a))) == os.path.normcase(os.path.normpath(os.path.realpath(b)))
+
+
+def safe_getcwd():
+    try:
+        return os.getcwd()
+    except FileNotFoundError:
+        return os.environ.get("PWD") or os.path.expanduser("~")
+
+
+def _same_or_child(path: str, parent: str):
+    path = os.path.normcase(os.path.normpath(os.path.realpath(path)))
+    parent = os.path.normcase(os.path.normpath(os.path.realpath(parent)))
+    return path == parent or path.startswith(parent + os.sep)
+
+
+def _skill_dir_from_path(path: str):
+    path = os.path.abspath(path)
+    parts = path.split(os.sep)
+    for i in range(len(parts) - 1):
+        if parts[i] == "skills" and parts[i + 1] == "agent-usage-stats":
+            return os.sep.join(parts[: i + 2]) or os.sep
+    return None
 
 
 def _remove_token_stats_path_blocks(content: str):

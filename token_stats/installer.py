@@ -69,6 +69,8 @@ def run_uninstall(project_root: str, install_dir_arg: str | None, config_dir: st
     is_win = sys.platform == "win32"
     install_dir = file_manager.resolve_install_dir(install_dir_arg)
     bin_dir = file_manager.default_bin_dir(install_dir)
+    if _abort_if_current_dir_is_managed(project_root, install_dir, "卸载", include_install_dir=True):
+        return
 
     removed, target = file_manager.remove_command_wrapper(bin_dir)
     legacy_removed, _ = file_manager.remove_command_wrapper(file_manager.legacy_bin_dir())
@@ -118,15 +120,20 @@ def run_update(project_root: str, version: str, install_dir_arg: str | None):
     print(f"⏳ 正在通过 ClawHub 更新 token-stats ({file_manager.platform_label()})...")
     install_dir = file_manager.resolve_install_dir(install_dir_arg)
     bin_dir = file_manager.default_bin_dir(install_dir)
+    if _abort_if_current_dir_is_managed(project_root, install_dir, "更新", include_install_dir=False):
+        return
     clawhub_exe = shutil.which("clawhub") or shutil.which("clawhub.cmd") or "clawhub"
+    clawhub_cwd = os.path.expanduser("~")
 
     try:
         old_ver = version
         clawhub_paths = []
+        print(f"   ClawHub 工作目录: {clawhub_cwd}")
         result = subprocess.run(
             [clawhub_exe, "update", "agent-usage-stats", "--no-input"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             timeout=120,
+            cwd=clawhub_cwd,
         )
         output = result.stdout.decode("utf-8", errors="ignore").strip()
         if output:
@@ -147,6 +154,7 @@ def run_update(project_root: str, version: str, install_dir_arg: str | None):
                 [clawhub_exe, "install", "agent-usage-stats", "--force"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 timeout=120,
+                cwd=clawhub_cwd,
             )
             out2 = result2.stdout.decode("utf-8", errors="ignore").strip()
             if out2:
@@ -208,6 +216,25 @@ def _update_search_dirs(project_root: str, install_dir: str, clawhub_paths: list
         seen.add(norm)
         out.append(item)
     return out
+
+
+def _abort_if_current_dir_is_managed(project_root: str, install_dir: str, action: str, *, include_install_dir: bool):
+    managed_dir = file_manager.current_dir_inside(
+        file_manager.maintenance_dirs(project_root, install_dir, include_install_dir=include_install_dir)
+    )
+    if not managed_dir:
+        return False
+    cwd = file_manager.safe_getcwd()
+    print(f"❌ 为避免删除或覆盖当前目录，已停止{action}。")
+    print(f"   当前目录: {cwd}")
+    print(f"   受维护目录: {managed_dir}")
+    print("   请先切换到其他目录后再重试，例如:")
+    if sys.platform == "win32":
+        print("     cd %USERPROFILE%")
+    else:
+        print("     cd ~")
+    print(f"     token-stats {'--uninstall' if action == '卸载' else 'update'}")
+    return True
 
 
 def _version_tuple(value: str):

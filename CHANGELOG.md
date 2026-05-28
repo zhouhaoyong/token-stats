@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.7.6 (2026-05-29)
+
+### 修复
+
+- **ClawHub 更新工作目录固定**：`token-stats update` 执行 `clawhub update/install --force` 时固定在用户主目录运行，避免用户在 `~/.local/bin`、`Documents` 等目录执行更新后，ClawHub 把新版下载到错误位置
+- **旧版本升级说明补齐**：明确 2.7.0 等旧版无法执行新版自修复逻辑，首次跨过该问题需要从 ClawHub 下载目录运行一次 `setup` 或使用新版入口
+- **回归测试补齐真实事故路径**：维护流回归会从旧命令目录触发 update，并断言 ClawHub 工作目录被固定到 HOME
+- **维护目录保护**：`token-stats update` 仅在当前目录位于 ClawHub skill 源目录时停止，避免覆盖正在使用的源码目录；`token-stats --uninstall` 会额外保护 `~/.token-stats`，因为卸载会删除安装目录
+
 ## v2.7.5 (2026-05-29)
 
 ### 修复

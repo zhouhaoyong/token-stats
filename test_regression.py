@@ -39,7 +39,7 @@ class Runner:
 
     def run(self, name: str, cmd: list[str], *, timeout: int = 45, stdin: str | None = None,
             env: dict[str, str] | None = None, expect: list[str] | None = None,
-            allow_fail: bool = False) -> subprocess.CompletedProcess:
+            allow_fail: bool = False, cwd: Path | str | None = None) -> subprocess.CompletedProcess:
         print(f"$ {' '.join(str(c) for c in cmd)}")
         run_env = os.environ.copy()
         run_env.setdefault("PYTHONIOENCODING", "utf-8")
@@ -55,6 +55,7 @@ class Runner:
                 encoding="utf-8",
                 errors="replace",
                 env=run_env,
+                cwd=str(cwd) if cwd is not None else None,
             )
         except subprocess.TimeoutExpired as exc:
             print("(超时)")
@@ -280,9 +281,11 @@ class Runner:
                 "update_repairs_wrapper",
                 PY + [SCRIPT, "update"],
                 env=env,
+                cwd=local_bin,
                 expect=[
                     "fake clawhub update agent-usage-stats",
                     f"Installed agent-usage-stats -> {local_bin_skill_dir}",
+                    f"ClawHub 工作目录: {home}",
                     "已检查全局命令",
                     "已迁移旧版全局命令",
                     "hash -r",
@@ -303,6 +306,46 @@ class Runner:
                 )
             if sys.platform != "win32" and f"export PATH=\"{install_dir / 'bin'}:$PATH\"" not in zshrc.read_text(encoding="utf-8"):
                 self.failures.append("update_repairs_wrapper: PATH block should prepend .token-stats/bin")
+
+            update_from_install_dir = self.run(
+                "update_allows_inside_install_dir",
+                PY + [SCRIPT, "update"],
+                env=env,
+                cwd=install_dir,
+                expect=["fake clawhub update agent-usage-stats", "已检查全局命令"],
+            )
+            if "为避免删除或覆盖当前目录" in ((update_from_install_dir.stdout or "") + (update_from_install_dir.stderr or "")):
+                self.failures.append("update_allows_inside_install_dir: update should not block inside install dir")
+
+            blocked_install_uninstall = self.run(
+                "uninstall_blocks_inside_install_dir",
+                PY + [SCRIPT, "--uninstall"],
+                env=env,
+                cwd=install_dir,
+                expect=["为避免删除或覆盖当前目录", "已停止卸载", str(install_dir), "cd ~"],
+            )
+            if blocked_install_uninstall.returncode == 0 and not install_dir.exists():
+                self.failures.append("uninstall_blocks_inside_install_dir: install cwd should not be removed")
+
+            blocked_update = self.run(
+                "update_blocks_inside_managed_dir",
+                PY + [SCRIPT, "update"],
+                env=env,
+                cwd=local_bin_skill_dir,
+                expect=["为避免删除或覆盖当前目录", "已停止更新", str(local_bin_skill_dir), "cd ~"],
+            )
+            if blocked_update.returncode == 0 and "fake clawhub update" in ((blocked_update.stdout or "") + (blocked_update.stderr or "")):
+                self.failures.append("update_blocks_inside_managed_dir: clawhub should not run from managed dir")
+
+            blocked_uninstall = self.run(
+                "uninstall_blocks_inside_managed_dir",
+                PY + [SCRIPT, "--uninstall"],
+                env=env,
+                cwd=local_bin_skill_dir,
+                expect=["为避免删除或覆盖当前目录", "已停止卸载", str(local_bin_skill_dir), "cd ~"],
+            )
+            if blocked_uninstall.returncode == 0 and not local_bin_skill_dir.exists():
+                self.failures.append("uninstall_blocks_inside_managed_dir: managed cwd should not be removed")
 
             self.run(
                 "uninstall_temp_home",
