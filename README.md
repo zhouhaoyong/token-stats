@@ -125,7 +125,7 @@ token-stats update
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.7.3
+# Output: token-stats v2.7.4
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -630,7 +630,7 @@ token-stats -a hermes,claude-code --month
 token-stats --uninstall
 ```
 
-> `--uninstall` automatically removes the wrapper, cleans the PATH entry, deletes config files, and removes the `~/.token-stats/` install directory. Works on all platforms.
+> `--uninstall` automatically removes wrappers, cleans PATH entries, deletes config files, removes `~/.token-stats/`, and clears ClawHub/history install directories such as `~/skills/agent-usage-stats` so reinstall can start cleanly. Works on all platforms.
 
 ---
 

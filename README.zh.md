@@ -163,7 +163,7 @@ token-stats update
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.7.3
+# 输出: token-stats v2.7.4
 
 # 验证 2：看已检测到的 Agent
 token-stats --list-backends
@@ -767,7 +767,7 @@ token-stats --version
 输出：
 
 ```
-token-stats v2.7.3
+token-stats v2.7.4
 ```
 
 **把 token-stats 更新到最新版：**
@@ -885,7 +885,7 @@ Agent 跑在 WSL2 中时，`token-stats` 在 Windows 侧自动检测并读取数
 token-stats --uninstall
 ```
 
-> `--uninstall` 会自动删除包装器、清理 PATH 条目、删除配置文件和 `~/.token-stats/` 安装目录。三平台统一。
+> `--uninstall` 会自动删除包装器、清理 PATH 条目、删除配置文件、删除 `~/.token-stats/`，并清理 `~/skills/agent-usage-stats` 等 ClawHub/历史安装目录，保证后续可以干净重装。三平台统一。
 
 ---
 

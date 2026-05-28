@@ -212,6 +212,12 @@ class Runner:
             bashrc.write_text("# old shell rc\n" + legacy_block, encoding="utf-8")
             local_bin = home / ".local" / "bin"
             local_bin.mkdir(parents=True, exist_ok=True)
+            clawhub_skill_dir = home / "skills" / "agent-usage-stats"
+            clawhub_skill_dir.mkdir(parents=True, exist_ok=True)
+            (clawhub_skill_dir / "token-stats.py").write_text("VERSION = \"0.0.1\"\n", encoding="utf-8")
+            legacy_clawhub_skill_dir = home / ".clawhub" / "skills" / "agent-usage-stats"
+            legacy_clawhub_skill_dir.mkdir(parents=True, exist_ok=True)
+            (legacy_clawhub_skill_dir / "token-stats.py").write_text("VERSION = \"0.0.1\"\n", encoding="utf-8")
             fake_clawhub = fake_bin / "clawhub"
             fake_clawhub.write_text("#!/bin/sh\necho \"fake clawhub $@\"\nexit 0\n", encoding="utf-8")
             fake_clawhub.chmod(0o755)
@@ -291,6 +297,10 @@ class Runner:
                 self.failures.append("uninstall_temp_home: legacy wrapper still exists")
             if install_dir.exists():
                 self.failures.append("uninstall_temp_home: install dir still exists")
+            if clawhub_skill_dir.exists():
+                self.failures.append("uninstall_temp_home: ClawHub skill dir still exists")
+            if legacy_clawhub_skill_dir.exists():
+                self.failures.append("uninstall_temp_home: legacy ClawHub skill dir still exists")
             if sys.platform != "win32" and "token-stats PATH" in zshrc.read_text(encoding="utf-8"):
                 self.failures.append("uninstall_temp_home: PATH block still exists")
             if sys.platform != "win32" and "token-stats PATH" in bashrc.read_text(encoding="utf-8"):

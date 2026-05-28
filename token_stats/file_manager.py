@@ -325,12 +325,14 @@ def find_update_sources(project_root: str, install_dir: str):
 
 
 def remove_install_dirs(install_dir: str, project_root: str):
-    """Remove the active install dir and report legacy dirs without deleting them."""
+    """Remove the active install dir and legacy ClawHub/source install dirs."""
     cwd = os.getcwd()
     removed = []
     skipped = []
     failed = []
     install_path = os.path.abspath(os.path.expanduser(resolve_install_dir(install_dir)))
+    project_path = os.path.abspath(os.path.expanduser(project_root))
+    protected_paths = {os.path.normcase(os.path.abspath(cwd)), os.path.normcase(project_path)}
     if os.path.exists(install_path):
         if _same_path(install_path, cwd):
             skipped.append(install_path)
@@ -342,8 +344,17 @@ def remove_install_dirs(install_dir: str, project_root: str):
                 failed.append((install_path, str(e)))
     for item in legacy_install_dirs(project_root):
         path = os.path.abspath(os.path.expanduser(item))
-        if os.path.exists(path) and not _same_path(path, install_path):
+        norm = os.path.normcase(path)
+        if not os.path.exists(path) or _same_path(path, install_path):
+            continue
+        if norm in protected_paths:
             skipped.append(path)
+            continue
+        try:
+            shutil.rmtree(path)
+            removed.append(path)
+        except OSError as e:
+            failed.append((path, str(e)))
     return removed, skipped, failed
 
 

@@ -1,7 +1,7 @@
 ---
 name: agent-usage-stats
 description: "选择要监控的 AI 助手 → 查看 token 消耗。支持 Hermes / Claude Code / CodeX / OpenClaw / Reasonix / DeepSeek TUI"
-version: 2.7.3
+version: 2.7.4
 author: zhy
 license: MIT
 source: https://github.com/zhy/token-stats

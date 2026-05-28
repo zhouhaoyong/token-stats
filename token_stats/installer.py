@@ -107,7 +107,7 @@ def run_uninstall(project_root: str, install_dir_arg: str | None, config_dir: st
         print(f"⚠️ 安装目录删除失败: {item}")
         print(f"   原因: {error}")
     for item in skipped_dirs:
-        print(f"ℹ️  保留源码/旧安装目录: {item}")
+        print(f"ℹ️  保留当前正在使用的源码目录: {item}")
 
     _print_uninstall_shell_hint()
     print()
@@ -187,9 +187,19 @@ def run_update(project_root: str, version: str, install_dir_arg: str | None):
 def _find_newer_source(search_dirs, old_ver: str):
     for item in search_dirs:
         ver = file_manager.read_version(item)
-        if ver and ver != old_ver:
+        if ver and _version_tuple(ver) > _version_tuple(old_ver):
             return item
     return None
+
+
+def _version_tuple(value: str):
+    parts = []
+    for item in value.split("."):
+        try:
+            parts.append(int(item))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
 
 
 def _remove_legacy_wrapper():

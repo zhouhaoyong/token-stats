@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.7.3 (2026-05-29)
+## v2.7.4 (2026-05-29)
 
 ### 修复
 
@@ -8,6 +8,7 @@
 - **fish shell PATH 修复**：`fish_add_path` 使用 `-p` 参数前置，与 bash/zsh 行为一致
 - **手动 PATH 提示修正**：README 和 installer 中的手动 PATH 命令统一为前置格式
 - **旧命令入口不断链**：`setup` / `update` 不再直接删除 `~/.local/bin/token-stats`，而是迁移为转发入口，避免当前 bash/zsh 缓存旧路径后执行失败
+- **ClawHub 卸载补齐**：`--uninstall` 会删除 `~/skills/agent-usage-stats` 等 ClawHub/历史安装目录，避免重新安装时报 `Already installed`
 
 ## v2.7.1 (2026-05-29)
 
