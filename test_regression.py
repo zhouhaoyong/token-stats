@@ -203,6 +203,13 @@ class Runner:
             fake_bin = Path(bin_tmp)
             zshrc = home / ".zshrc"
             zshrc.write_text("# test shell rc\n", encoding="utf-8")
+            bashrc = home / ".bashrc"
+            legacy_block = (
+                "\n# >>> token-stats PATH >>>\n"
+                f"export PATH=\"$PATH:{home / '.local' / 'bin'}\"\n"
+                "# <<< token-stats PATH <<<\n"
+            )
+            bashrc.write_text("# old shell rc\n" + legacy_block, encoding="utf-8")
             fake_clawhub = fake_bin / "clawhub"
             fake_clawhub.write_text("#!/bin/sh\necho \"fake clawhub $@\"\nexit 0\n", encoding="utf-8")
             fake_clawhub.chmod(0o755)
@@ -227,17 +234,26 @@ class Runner:
                     self.failures.append("setup_temp_home: entry script was not copied")
                 if sys.platform != "win32" and ".token-stats/bin" not in zshrc.read_text(encoding="utf-8"):
                     self.failures.append("setup_temp_home: PATH block missing from .zshrc")
+                if sys.platform != "win32" and "token-stats PATH" in bashrc.read_text(encoding="utf-8"):
+                    self.failures.append("setup_temp_home: legacy PATH block still exists in .bashrc")
 
             if wrapper.exists():
                 wrapper.unlink()
+            legacy_wrapper = home / ".local" / "bin" / ("token-stats.cmd" if sys.platform == "win32" else "token-stats")
+            legacy_wrapper.parent.mkdir(parents=True, exist_ok=True)
+            legacy_wrapper.write_text("legacy token-stats\n", encoding="utf-8")
+            if sys.platform != "win32":
+                legacy_wrapper.chmod(0o755)
             self.run(
                 "update_repairs_wrapper",
                 PY + [SCRIPT, "update"],
                 env=env,
-                expect=["fake clawhub update agent-usage-stats", "已检查全局命令"],
+                expect=["fake clawhub update agent-usage-stats", "已检查全局命令", "已清理旧版全局命令"],
             )
             if not wrapper.exists():
                 self.failures.append("update_repairs_wrapper: wrapper was not repaired")
+            if legacy_wrapper.exists():
+                self.failures.append("update_repairs_wrapper: legacy wrapper was not removed")
 
             self.run(
                 "uninstall_temp_home",
@@ -251,6 +267,8 @@ class Runner:
                 self.failures.append("uninstall_temp_home: install dir still exists")
             if sys.platform != "win32" and "token-stats PATH" in zshrc.read_text(encoding="utf-8"):
                 self.failures.append("uninstall_temp_home: PATH block still exists")
+            if sys.platform != "win32" and "token-stats PATH" in bashrc.read_text(encoding="utf-8"):
+                self.failures.append("uninstall_temp_home: legacy PATH block still exists in .bashrc")
 
     def summary(self) -> int:
         self.sep("测试结论")

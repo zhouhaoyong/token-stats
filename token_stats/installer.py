@@ -35,8 +35,12 @@ def run_setup(project_root: str, install_dir_arg: str | None, scan_agent_paths, 
     _remove_legacy_wrapper()
 
     if is_win:
+        legacy_path_result = file_manager.remove_from_path_windows(file_manager.legacy_bin_dir())
+        if legacy_path_result.status == "removed":
+            print(f"✅ 已清理旧版 PATH: {file_manager.legacy_bin_dir()}")
         path_result = file_manager.add_to_path_windows(bin_dir)
     else:
+        _clean_unix_path_blocks_quiet()
         rc = file_manager.detect_rc_file()
         path_result = file_manager.add_to_path_unix(bin_dir, rc)
     _print_path_add_result(path_result, bin_dir)
@@ -105,6 +109,7 @@ def run_uninstall(project_root: str, install_dir_arg: str | None, config_dir: st
     for item in skipped_dirs:
         print(f"ℹ️  保留源码/旧安装目录: {item}")
 
+    _print_uninstall_shell_hint()
     print()
     print("卸载完成。")
 
@@ -221,11 +226,17 @@ def _repair_command_and_path(bin_dir: str, install_dir: str):
         return
     target = file_manager.refresh_command_wrapper(bin_dir, install_dir)
     print(f"✅ 已检查全局命令: {target}")
+    _remove_legacy_wrapper()
     if sys.platform == "win32":
+        legacy_path_result = file_manager.remove_from_path_windows(file_manager.legacy_bin_dir())
+        if legacy_path_result.status == "removed":
+            print(f"✅ 已清理旧版 PATH: {file_manager.legacy_bin_dir()}")
         path_result = file_manager.add_to_path_windows(bin_dir)
     else:
+        _clean_unix_path_blocks_quiet()
         path_result = file_manager.add_to_path_unix(bin_dir, file_manager.detect_rc_file())
     _print_path_add_result(path_result, bin_dir)
+    _print_current_shell_hint(bin_dir, target)
 
 
 def _print_path_add_result(result, bin_dir: str):
@@ -255,6 +266,14 @@ def _print_path_remove_result(results):
             print(f"   原因: {item.error}")
 
 
+def _clean_unix_path_blocks_quiet():
+    results = file_manager.remove_from_path_unix_all(file_manager.default_bin_dir())
+    results.extend(file_manager.remove_from_path_unix_all(file_manager.legacy_bin_dir()))
+    removed = [r.target for r in results if r.status == "removed"]
+    for item in removed:
+        print(f"✅ 已清理旧版 PATH 配置: {item}")
+
+
 def _print_manual_path_hint(bin_dir: str):
     if sys.platform == "win32":
         print("   Windows 可手动添加用户 PATH:")
@@ -276,6 +295,33 @@ def _print_wsl_hint():
     if file_manager.is_wsl():
         print("ℹ️  当前运行在 WSL2/Linux 环境。此处只配置 WSL 内的 PATH；")
         print("   如果你也要在 Windows PowerShell/CMD 使用，请在 Windows 侧单独执行 setup。")
+
+
+def _print_current_shell_hint(bin_dir: str, target: str):
+    if not target:
+        return
+    current_path = os.environ.get("PATH", "")
+    entries = [os.path.abspath(os.path.expanduser(p)) for p in current_path.split(os.pathsep) if p]
+    bin_abs = os.path.abspath(os.path.expanduser(bin_dir))
+    resolved = shutil.which("token-stats")
+    if bin_abs in entries and resolved and os.path.abspath(resolved) == os.path.abspath(target):
+        print("✅ 当前终端已可直接使用: token-stats --version")
+        return
+    print("ℹ️  当前终端可能仍在使用旧 PATH。请打开新终端后验证:")
+    print("     which token-stats")
+    print("     token-stats --version")
+    if sys.platform != "win32":
+        print(f"   如需当前终端立即生效，可执行: export PATH=\"{bin_dir}:$PATH\"")
+
+
+def _print_uninstall_shell_hint():
+    if sys.platform == "win32":
+        print("ℹ️  如果当前 PowerShell/CMD 仍能找到 token-stats，请打开新终端后再验证。")
+        return
+    print("ℹ️  如果当前终端仍缓存 token-stats 路径，请打开新终端后验证。")
+    shell = os.path.basename(os.environ.get("SHELL", ""))
+    if shell in {"zsh", "bash"}:
+        print("   当前终端可执行: hash -r")
 
 
 def _print_clawhub_install_hint():
