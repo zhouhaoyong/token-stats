@@ -163,7 +163,7 @@ token-stats update
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.7.2
+# 输出: token-stats v2.7.3
 
 # 验证 2：看已检测到的 Agent
 token-stats --list-backends
@@ -767,7 +767,7 @@ token-stats --version
 输出：
 
 ```
-token-stats v2.7.2
+token-stats v2.7.3
 ```
 
 **把 token-stats 更新到最新版：**

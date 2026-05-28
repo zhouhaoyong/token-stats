@@ -241,6 +241,15 @@ class Runner:
                 if sys.platform != "win32" and "token-stats PATH" in bashrc.read_text(encoding="utf-8"):
                     self.failures.append("setup_temp_home: legacy PATH block still exists in .bashrc")
 
+            setup_legacy_wrapper = local_bin / ("token-stats.cmd" if sys.platform == "win32" else "token-stats")
+            if setup.returncode == 0 and setup_legacy_wrapper.exists():
+                self.run(
+                    "setup_legacy_wrapper_forwards",
+                    [str(setup_legacy_wrapper), "--version"],
+                    env=env,
+                    expect=["token-stats v"],
+                )
+
             if wrapper.exists():
                 wrapper.unlink()
             legacy_wrapper = local_bin / ("token-stats.cmd" if sys.platform == "win32" else "token-stats")
@@ -252,12 +261,21 @@ class Runner:
                 "update_repairs_wrapper",
                 PY + [SCRIPT, "update"],
                 env=env,
-                expect=["fake clawhub update agent-usage-stats", "已检查全局命令", "已清理旧版全局命令"],
+                expect=["fake clawhub update agent-usage-stats", "已检查全局命令", "已迁移旧版全局命令", "hash -r"],
             )
             if not wrapper.exists():
                 self.failures.append("update_repairs_wrapper: wrapper was not repaired")
+            if not legacy_wrapper.exists():
+                self.failures.append("update_repairs_wrapper: legacy wrapper should remain as a forwarder")
+            elif str(install_dir / "token-stats.py") not in legacy_wrapper.read_text(encoding="utf-8"):
+                self.failures.append("update_repairs_wrapper: legacy wrapper should forward to install entry")
             if legacy_wrapper.exists():
-                self.failures.append("update_repairs_wrapper: legacy wrapper was not removed")
+                self.run(
+                    "update_legacy_wrapper_forwards",
+                    [str(legacy_wrapper), "--version"],
+                    env=env,
+                    expect=["token-stats v"],
+                )
             if sys.platform != "win32" and f"export PATH=\"{install_dir / 'bin'}:$PATH\"" not in zshrc.read_text(encoding="utf-8"):
                 self.failures.append("update_repairs_wrapper: PATH block should prepend .token-stats/bin")
 
@@ -269,6 +287,8 @@ class Runner:
             )
             if wrapper.exists():
                 self.failures.append("uninstall_temp_home: wrapper still exists")
+            if legacy_wrapper.exists():
+                self.failures.append("uninstall_temp_home: legacy wrapper still exists")
             if install_dir.exists():
                 self.failures.append("uninstall_temp_home: install dir still exists")
             if sys.platform != "win32" and "token-stats PATH" in zshrc.read_text(encoding="utf-8"):

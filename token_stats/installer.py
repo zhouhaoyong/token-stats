@@ -32,7 +32,7 @@ def run_setup(project_root: str, install_dir_arg: str | None, scan_agent_paths, 
 
     target = file_manager.write_command_wrapper(bin_dir, script_path)
     print(f"✅ 已创建全局命令: {target}")
-    _remove_legacy_wrapper()
+    _migrate_legacy_wrapper(script_path)
 
     if is_win:
         legacy_path_result = file_manager.remove_from_path_windows(file_manager.legacy_bin_dir())
@@ -198,6 +198,16 @@ def _remove_legacy_wrapper():
         print(f"✅ 已清理旧版全局命令: {item}")
 
 
+def _migrate_legacy_wrapper(script_path: str):
+    """Keep old shell command caches working during the update terminal session."""
+    legacy_bin = file_manager.legacy_bin_dir()
+    removed, legacy_target = file_manager.remove_command_wrapper(legacy_bin)
+    if removed:
+        target = file_manager.write_command_wrapper(legacy_bin, script_path)
+        print(f"✅ 已迁移旧版全局命令: {legacy_target} -> {target}")
+    return legacy_target
+
+
 def _warn_legacy_aliases():
     rc = file_manager.detect_rc_file()
     rc_files = list(dict.fromkeys([rc, "~/.zshrc", "~/.bashrc", "~/.bash_profile"]))
@@ -226,7 +236,7 @@ def _repair_command_and_path(bin_dir: str, install_dir: str):
         return
     target = file_manager.refresh_command_wrapper(bin_dir, install_dir)
     print(f"✅ 已检查全局命令: {target}")
-    _remove_legacy_wrapper()
+    _migrate_legacy_wrapper(script_path)
     if sys.platform == "win32":
         legacy_path_result = file_manager.remove_from_path_windows(file_manager.legacy_bin_dir())
         if legacy_path_result.status == "removed":
@@ -311,7 +321,11 @@ def _print_current_shell_hint(bin_dir: str, target: str):
     print("     which token-stats")
     print("     token-stats --version")
     if sys.platform != "win32":
-        print(f"   如需当前终端立即生效，可执行: export PATH=\"{bin_dir}:$PATH\"")
+        print("   如需当前终端立即生效，可执行:")
+        print(f"     export PATH=\"{bin_dir}:$PATH\"")
+        shell = os.path.basename(os.environ.get("SHELL", ""))
+        if shell in {"zsh", "bash"}:
+            print("     hash -r")
 
 
 def _print_uninstall_shell_hint():

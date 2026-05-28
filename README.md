@@ -125,7 +125,7 @@ token-stats update
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.7.2
+# Output: token-stats v2.7.3
 
 # Check 2: list installed agents
 token-stats --list-backends

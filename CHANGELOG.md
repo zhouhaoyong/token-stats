@@ -1,18 +1,20 @@
 # Changelog
 
-## v2.7.2 (2026-05-29)
+## v2.7.3 (2026-05-29)
 
 ### 修复
 
 - **PATH 前置而非追加**：安装时将 `~/.token-stats/bin` 前置到 PATH，确保新版 token-stats 优先于旧版命令
 - **fish shell PATH 修复**：`fish_add_path` 使用 `-p` 参数前置，与 bash/zsh 行为一致
 - **手动 PATH 提示修正**：README 和 installer 中的手动 PATH 命令统一为前置格式
+- **旧命令入口不断链**：`setup` / `update` 不再直接删除 `~/.local/bin/token-stats`，而是迁移为转发入口，避免当前 bash/zsh 缓存旧路径后执行失败
 
 ## v2.7.1 (2026-05-29)
 
 ### 修复
 
 - **安装/更新兼容老版本路径**：`setup` / `update` 会清理旧版 `~/.local/bin/token-stats` 命令入口和旧 PATH 标记，并将 `~/.token-stats/bin` 前置到 PATH，避免更新后仍命中老命令
+- **更新后当前终端兼容**：`update` 会把旧版命令入口迁移为转发入口，避免 bash/zsh 已缓存旧路径时出现 `No such file or directory`
 - **卸载清理更完整**：`--uninstall` 同时清理新版安装目录、旧版命令入口、PATH 标记和配置文件，并按系统给出终端缓存刷新提示
 - **跨平台提示优化**：针对 macOS、Linux、Windows 和 WSL2 的 PATH 生效、命令缓存和异常场景给出更明确的提示
 
