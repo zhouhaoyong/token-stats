@@ -125,7 +125,7 @@ token-stats update
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.7.1
+# Output: token-stats v2.7.2
 
 # Check 2: list installed agents
 token-stats --list-backends
@@ -714,13 +714,13 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 
 **macOS (zsh):**
 ```bash
-echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.zshrc
+echo 'export PATH="$HOME/.token-stats/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **Linux (bash):**
 ```bash
-echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.bashrc
+echo 'export PATH="$HOME/.token-stats/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 

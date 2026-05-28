@@ -210,13 +210,15 @@ class Runner:
                 "# <<< token-stats PATH <<<\n"
             )
             bashrc.write_text("# old shell rc\n" + legacy_block, encoding="utf-8")
+            local_bin = home / ".local" / "bin"
+            local_bin.mkdir(parents=True, exist_ok=True)
             fake_clawhub = fake_bin / "clawhub"
             fake_clawhub.write_text("#!/bin/sh\necho \"fake clawhub $@\"\nexit 0\n", encoding="utf-8")
             fake_clawhub.chmod(0o755)
             env = {
                 "HOME": str(home),
                 "SHELL": "/bin/zsh",
-                "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                "PATH": f"{fake_bin}{os.pathsep}{local_bin}{os.pathsep}{os.environ.get('PATH', '')}",
             }
 
             setup = self.run(
@@ -234,12 +236,14 @@ class Runner:
                     self.failures.append("setup_temp_home: entry script was not copied")
                 if sys.platform != "win32" and ".token-stats/bin" not in zshrc.read_text(encoding="utf-8"):
                     self.failures.append("setup_temp_home: PATH block missing from .zshrc")
+                if sys.platform != "win32" and f"export PATH=\"{install_dir / 'bin'}:$PATH\"" not in zshrc.read_text(encoding="utf-8"):
+                    self.failures.append("setup_temp_home: PATH block should prepend .token-stats/bin")
                 if sys.platform != "win32" and "token-stats PATH" in bashrc.read_text(encoding="utf-8"):
                     self.failures.append("setup_temp_home: legacy PATH block still exists in .bashrc")
 
             if wrapper.exists():
                 wrapper.unlink()
-            legacy_wrapper = home / ".local" / "bin" / ("token-stats.cmd" if sys.platform == "win32" else "token-stats")
+            legacy_wrapper = local_bin / ("token-stats.cmd" if sys.platform == "win32" else "token-stats")
             legacy_wrapper.parent.mkdir(parents=True, exist_ok=True)
             legacy_wrapper.write_text("legacy token-stats\n", encoding="utf-8")
             if sys.platform != "win32":
@@ -254,6 +258,8 @@ class Runner:
                 self.failures.append("update_repairs_wrapper: wrapper was not repaired")
             if legacy_wrapper.exists():
                 self.failures.append("update_repairs_wrapper: legacy wrapper was not removed")
+            if sys.platform != "win32" and f"export PATH=\"{install_dir / 'bin'}:$PATH\"" not in zshrc.read_text(encoding="utf-8"):
+                self.failures.append("update_repairs_wrapper: PATH block should prepend .token-stats/bin")
 
             self.run(
                 "uninstall_temp_home",

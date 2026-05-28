@@ -124,7 +124,7 @@ def remove_command_wrapper(bin_dir: str):
         targets = [os.path.join(bin_dir, "token-stats")]
     removed = []
     for target in targets:
-        if os.path.exists(target):
+        if os.path.lexists(target):
             os.remove(target)
             removed.append(target)
     return removed, targets[0]
@@ -204,7 +204,7 @@ def add_to_path_windows(bin_dir):
         entries = [os.path.normpath(e) for e in current.split(";") if e]
         if bin_dir.lower() in (e.lower() for e in entries):
             return PathEditResult("exists", bin_dir)
-        entries.append(bin_dir)
+        entries.insert(0, bin_dir)
         winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ, ";".join(entries))
         ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 2, 5000, None)
         return PathEditResult("added", bin_dir)
@@ -245,7 +245,7 @@ def add_to_path_unix(bin_dir, rc_file):
     """Append a marked PATH block to a shell startup file if missing."""
     rc_path = os.path.expanduser(rc_file)
     is_fish = rc_file.endswith(".fish") or "fish" in rc_file
-    export_line = f"fish_add_path {bin_dir}" if is_fish else f'export PATH="$PATH:{bin_dir}"'
+    export_line = f"fish_add_path -p {bin_dir}" if is_fish else f'export PATH="{bin_dir}:$PATH"'
     block = f"\n{PATH_MARKER_START}\n{export_line}\n{PATH_MARKER_END}\n"
     try:
         content = ""

@@ -163,7 +163,7 @@ token-stats update
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.7.1
+# 输出: token-stats v2.7.2
 
 # 验证 2：看已检测到的 Agent
 token-stats --list-backends
@@ -767,7 +767,7 @@ token-stats --version
 输出：
 
 ```
-token-stats v2.7.1
+token-stats v2.7.2
 ```
 
 **把 token-stats 更新到最新版：**
@@ -969,13 +969,13 @@ python $HOME\skills\agent-usage-stats\token-stats.py setup
 
 **macOS（zsh）：**
 ```bash
-echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.zshrc
+echo 'export PATH="$HOME/.token-stats/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **Linux（bash）：**
 ```bash
-echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.bashrc
+echo 'export PATH="$HOME/.token-stats/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 

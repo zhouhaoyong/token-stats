@@ -283,11 +283,11 @@ def _print_manual_path_hint(bin_dir: str):
     shell = os.path.basename(os.environ.get("SHELL", ""))
     if shell == "fish":
         print("   fish 可手动执行:")
-        print(f"     fish_add_path {bin_dir}")
+        print(f"     fish_add_path -p {bin_dir}")
     else:
         rc = file_manager.detect_rc_file()
         print("   可手动执行:")
-        print(f"     echo 'export PATH=\"$PATH:{bin_dir}\"' >> {rc}")
+        print(f"     echo 'export PATH=\"{bin_dir}:$PATH\"' >> {rc}")
         print(f"     source {rc}")
 
 

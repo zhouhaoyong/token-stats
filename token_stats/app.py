@@ -91,7 +91,7 @@ from .formatting import (
     strip_ansi as _strip_ansi,
 )
 
-VERSION = "2.7.1"
+VERSION = "2.7.2"
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 
