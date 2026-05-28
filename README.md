@@ -4,11 +4,11 @@ Run it, pick an agent, see the stats. Every time.
 
 ## What's this?
 
-You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, OpenClaw…).
+You have multiple AI assistants on one device (Hermes, Claude Code, CodeX, OpenClaw, Reasonix, DeepSeek TUI…).
 `token-stats` lets you **choose one and see how many tokens it's consuming**.
 
-> ⚠️ **Important: this tool only reads local agent data on this machine.**
-> If you run agents on different PCs or servers, each machine stores its own data
+> ⚠️ **Important: this tool only reads local agent data on the current device.**
+> If you run agents on different PCs or servers, each device stores its own data
 > and needs its own installation of `token-stats`. Cross-machine statistics are not supported.
 >
 > All statistics are queried based on the specific agent you select, not a global total.
@@ -21,10 +21,10 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 
 | Feature | Command | Description |
 |---------|---------|-------------|
-| **Token stats** — by time range | `token-stats -a hermes --month` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw), multi-model. Input/output/cache tokens + call counts, only models with data |
+| **Token stats** — by time range | `token-stats -a hermes --month` | Multi-agent (Hermes / Claude Code / CodeX / OpenClaw / Reasonix / DeepSeek TUI), multi-model. Input/output/cache tokens + call counts, only models with data |
 | **Live monitor** — context tracking | `token-stats -a hermes --watch` | Per-round delta + cumulative, warns above 90%. macOS / Linux / Windows |
 | **Compare** — side-by-side periods | `--compare --a yesterday --b today` | Any time range, multi-model comparison with diff column |
-| **Export** — XLSX / JSON | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
+| **Export** — XLSX / CSV / JSON | `--export` | Multi-agent, multi-period combinations. Interactive directory picker |
 | **Model detect** — proxy API verification | `token-stats -a <name>` | Auto-detects 69 models from 13 providers by actual API response name |
 
 ---
@@ -33,7 +33,7 @@ You have multiple AI assistants on your machine (Hermes, Claude Code, CodeX, Ope
 
 Before installing `token-stats`, make sure you have these:
 
-### 1. Python 3.8+
+### 1. Python 3.11+
 
 `token-stats` is a pure Python script using only stdlib — no pip packages needed.
 
@@ -78,67 +78,72 @@ clawhub -V          # show version
 
 ## Install
 
-Install to `~/token-stats/` in your home directory (writable on all OSes, works like a global install):
+Install with **ClawHub**. After ClawHub downloads the skill, run `setup`; it copies the runtime files into `~/.token-stats/`, creates `~/.token-stats/bin/token-stats`, and adds `~/.token-stats/bin` to PATH.
 
 **macOS / Linux:**
 ```bash
-git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
-python3 ~/token-stats/token-stats.py setup
+cd ~
+clawhub install agent-usage-stats
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
 **Windows (PowerShell):**
 ```powershell
-git clone https://github.com/zhouhaoyong/token-stats.git $HOME\token-stats
-python $HOME\token-stats\token-stats.py setup
+cd $HOME
+clawhub install agent-usage-stats
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```
 
-> No git? Download the ZIP from [GitHub Releases](https://github.com/zhouhaoyong/token-stats/releases) and extract to `~/token-stats/`.
-> If `python` is not found, try `python3` (Microsoft Store Python uses `python3`).
-> If you get `can't open file '...~...'`, see: [PowerShell path expansion](#ps-tilde).
->
-> `setup` automatically adds `~/.local/bin` to your system PATH. **Open a new terminal** for it to take effect.
+Update:
+
+```bash
+token-stats update
+# Or update the ClawHub skill first, then run setup again
+clawhub update agent-usage-stats
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+```
+
+Uninstall:
+
+```bash
+token-stats --uninstall
+```
+
+To also remove the ClawHub-downloaded files, delete `~/skills/agent-usage-stats/`.
 
 That's it. Open a new terminal and run `token-stats`.
 
 ### Update
 
-Choose the update method that matches your install method:
-
-**Option 1: git clone install** (recommended)
-```bash
-cd ~/token-stats && git pull
-```
-> The wrapper (`~/.local/bin/token-stats`) created by `setup` points to the live files — no re-setup needed after pulling.
-
-**Option 2: ClawHub install**
 ```bash
 token-stats update
 ```
-> This runs `clawhub update agent-usage-stats` internally, then copies updated files into your install directory.
-
-> **ClawHub users** can also install via `clawhub install agent-usage-stats --dir ~`, then run
-> `python3 ~/skills/agent-usage-stats/token-stats.py setup`.
+> This runs `clawhub update agent-usage-stats` internally, then copies updated files into `~/.token-stats/`.
 
 ### Verify Installation
 
 ```bash
 # Check 1: version
 token-stats --version
-# Output: token-stats v2.3.8
+# Output: token-stats v2.7.0
 
 # Check 2: list installed agents
 token-stats --list-backends
 # Example output:
-#   ✅ Hermes
 #   ✅ Claude Code
-#   ❌ CodeX
+#   ✅ CodeX
+#   ✅ Hermes
 #   ❌ OpenClaw
+#   ✅ Reasonix
+#   ✅ DeepSeek TUI
 
 # Check 3: view stats for an agent
-token-stats -a hermes
+token-stats -a claude-code --month
 # Example output:
-# 📊 Hermes
-#   deepseek-v4-flash | 上下文 62.4K/1.05M (6.0%) | 入 57.1K | 出 5.4K | 缓 0 | 总计/+缓存 62.4K/62.4K | 调用 13 次
+# 📊 Claude Code
+#   deepseek-v4-flash | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次
+#   deepseek-v4-pro   | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次
+#   合计              | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次
 ```
 
 If all three checks produce output, installation is successful 🎉
@@ -167,36 +172,55 @@ token-stats --version
 | Check today's token usage | `token-stats --all -t` | **All agents** |
 | Check this month's usage | `token-stats --all -m` | **All agents** |
 | View Claude Code only | `token-stats -a claude-code` | **Single agent** |
+| Current snapshot / detail | `token-stats -a claude-code --now` / `--detail` | **Single agent** |
 | Real-time monitoring | `token-stats -a claude-code -w` | **Single agent** |
 | Compare last week vs this week | `token-stats -a claude-code --compare --a last-week --b this-week` | **Single agent** |
 | Export to Excel | `token-stats -a claude-code -m -e` | **Single / All agents** |
+| List detected agents | `token-stats --list-backends` | Current device |
+| Update / uninstall | `token-stats update` / `token-stats --uninstall` | Tool maintenance |
 | Interactive menu | `token-stats` | Interactive |
 
 ### Common Options
 
 | Short | Long | What it does |
 |:---:|---|---|
-| `-a` | `--agent` | Pick which agent: `hermes` / `claude-code` / `codex` / `openclaw`. Use commas for multiple |
+| `-a` | `--agent` | Pick which agent: `claude-code` / `codex` / `hermes` / `openclaw` / `reasonix` / `deepseek-tui`. Use commas for multiple |
 | `-t` | `--today` | Today only |
+| | `--yesterday` | Yesterday only |
+| | `--week` | This week, starting Monday |
+| | `--last-7d` | Last 7 days |
 | `-m` | `--month` | This month (1st to today) |
 | `-y` | `--year` | This year (Jan 1 to today) |
+| | `--from` / `--to` | Custom date range, `YYYY-MM-DD` |
 | `-w` | `--watch` | Live monitor, refreshes every 5 seconds, Ctrl+C to stop |
 | `-e` | `--export` | Export to XLSX / CSV / JSON file |
 | `-v` | `--version` | Show version number |
 | `-l` | `--list-backends` | List installed AI assistants |
+| | `--compare` / `--a` / `--b` | Compare two periods |
+| | `--now` / `--detail` | Current snapshot / detail mode, same as default stats |
 | `--all` | | View **all** agents at once |
+| | `setup` / `--setup` | Install to `~/.token-stats/`, create `~/.token-stats/bin/token-stats`, and add it to PATH |
+| | `update` / `--update` | Update to the latest version |
+| | `--uninstall` | Remove wrapper, install directory, and PATH entry |
 
 > Short options can be combined. For example, `-a claude-code -t -e` means "Claude Code only, today, export."
+> Example outputs below are anonymized examples. Your numbers will differ by agent, model, timezone, and usage.
 
 ---
 
 ### 1. View a Single Agent
 
-Replace `claude-code` with your agent (`hermes` / `codex` / `openclaw`).
+Replace `claude-code` with your agent (`codex` / `hermes` / `openclaw` / `reasonix` / `deepseek-tui`).
 
 **All history (no time filter):**
 ```bash
 token-stats -a claude-code
+```
+
+**Current snapshot / detail mode (same as default stats):**
+```bash
+token-stats -a claude-code --now
+token-stats -a claude-code --detail
 ```
 
 **Today only:**
@@ -231,18 +255,20 @@ token-stats -a claude-code --last-7d
 
 **Custom date range:**
 ```bash
-# From Jan 1 to May 18
-token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
+# From May 1 to May 28
+token-stats -a claude-code --from 2026-05-01 --to 2026-05-28
 ```
 
-Example output:
+Example output (`token-stats -a claude-code --month`):
 ```
 📊 Claude Code
-  deepseek-v4-flash | In 2.02M | Out 77.48K | Cache 8.36M | Total/+Cache 2.1M/10.46M | Calls 349
-  deepseek-v4-pro   | In 4.9M  | Out 1.19M  | Cache 451.87M | Total/+Cache 6.09M/457.96M | Calls 2348
-  Subtotal          | In 6.93M | Out 1.27M  | Cache 460.24M | Total/+Cache 8.2M/468.44M | Calls 2702
+  Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131     | 缓 0                | 总计/+缓存 23.04K/23.04K   | 调用 1 次     | -
+  deepseek-v4-flash                     | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次  | ≈¥7.63
+  deepseek-v4-pro                       | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次 | ≈¥139.26
+  gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K   | 缓 0                | 总计/+缓存 90.26K/90.26K   | 调用 4 次     | -
+  合计                                  | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次 | ≈¥146.89 (仅供参考)
   ────────────────────────────────────
-  Sub-agents: 17 | Sessions: 20 | Projects: 4
+  子代理: 89 次 | 会话: 65 个 | 项目: 5 个
 ```
 
 ---
@@ -268,6 +294,37 @@ token-stats --all -m
 
 # All agents, this year
 token-stats --all --year
+```
+
+Example output (`token-stats --all --month`):
+```
+📊 本机 Agent 统计汇总
+══════════════════════════════════════════════════
+
+✅ Claude Code
+📊 Claude Code
+  deepseek-v4-flash | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次  | ≈¥7.63
+  deepseek-v4-pro   | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次 | ≈¥139.26
+  合计              | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次 | ≈¥146.89 (仅供参考)
+
+✅ CodeX
+📊 CodeX
+  gpt-5.5           | 入 4.05M   | 出 357.25K | 缓 70.33M (94.6%)  | 总计/+缓存 4.4M/74.73M    | 调用 755 次 | ≈¥1499.10
+  codex-auto-review | 入 53.29K  | 出 994     | 缓 218.11K (80.4%) | 总计/+缓存 54.28K/272.39K | 调用 9 次   | ≈¥0.00
+  gpt-5.4           | 入 996.02K | 出 117.15K | 缓 9.12M (90.2%)   | 总计/+缓存 1.11M/10.24M   | 调用 196 次 | ≈¥113.47
+  合计              | 入 5.1M    | 出 475.39K | 缓 79.67M (94.0%)  | 总计/+缓存 5.57M/85.24M   | 调用 960 次 | ≈¥1612.57 (仅供参考)
+
+✅ Reasonix
+📊 Reasonix
+  deepseek-v4-flash | 入 189.67K | 出 4.93K | 缓 162.18K (85.5%) | 总计/+缓存 194.6K/356.77K | 调用 14 次 | ≈¥0.04
+
+✅ DeepSeek TUI
+📊 DeepSeek TUI
+  deepseek-v4-pro | 总计 499.88K | 1 轮会话 | 工具调用 14 次 | ≈¥0.1477
+
+══════════════════════════════════════════════════
+  全部 Agent 总计
+  入 40.76M | 出 8.13M | 缓 2802.43M (98.6%) | 总计/+缓存 48.89M/2851.32M | 调用 16521 次 | ≈¥1769.15 (仅供参考)
 ```
 
 ---
@@ -317,6 +374,38 @@ token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~20
 ```
 
 Supported labels: `today` / `yesterday` / `this-week` / `last-week` / `this-month` / `last-month` / `this-year` / `last-year` / `YYYY-MM-DD` / `YYYY-MM-DD~YYYY-MM-DD`
+
+Example output (`token-stats -a claude-code --compare --a last-month --b this-month`):
+```
+📊 对比: 2026-04-01~2026-04-30 vs 2026-05-01~2026-05-28  [Claude Code]
+====================================================================================================================
+  模型                                  | 指标         | 2026-04-01~2026-04-30 | 2026-05-01~2026-05-28 | 变化
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  deepseek-v4-flash                     | 入           | 0                     | 6435411               | +6.44M
+                                        | 出           | 0                     | 320278                | +320.28K
+                                        | 缓           | 0                     | 27863808              | +27.86M
+                                        | 缓存率       | -                     | 81.2%                 |
+                                        | 总计         | 0                     | 6755689               | +6.76M
+                                        | 总计(含缓存) | 0                     | 34619497              | +34.62M
+                                        | 调用         | 0                     | 1313                  | +1.31K
+  ··················································································································
+  deepseek-v4-pro                       | 入           | 0                     | 13116946              | +13.12M
+                                        | 出           | 0                     | 6355014               | +6.36M
+                                        | 缓           | 0                     | 2471198592            | +2471.2M
+                                        | 缓存率       | -                     | 99.5%                 |
+                                        | 总计         | 0                     | 19471960              | +19.47M
+                                        | 总计(含缓存) | 0                     | 2490670552            | +2490.67M
+                                        | 调用         | 0                     | 11835                 | +11.84K
+  ··················································································································
+  合计                                  | 入           | 0                     | 19664445              | +19.66M
+                                        | 出           | 0                     | 6676503               | +6.68M
+                                        | 缓           | 0                     | 2499062400            | +2499.06M
+                                        | 缓存率       | -                     | 99.2%                 |
+                                        | 总计         | 0                     | 26340948              | +26.34M
+                                        | 总计(含缓存) | 0                     | 2525403348            | +2525.4M
+                                        | 调用         | 0                     | 13153                 | +13.15K
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+```
 
 ---
 
@@ -423,11 +512,13 @@ clawhub install agent-usage-stats --force
 **Uninstall token-stats:**
 
 ```bash
-# Step 1: Remove wrapper + PATH
 token-stats --uninstall
+```
 
-# Step 2: Remove skill files
-clawhub uninstall agent-usage-stats
+**Run setup after ClawHub install:**
+
+```bash
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
 ---
@@ -440,6 +531,8 @@ clawhub uninstall agent-usage-stats
 | **Claude Code** | Total + input/output/cache + calls + sub-agents/projects | Same |
 | **CodeX** | Input/output/cache + calls + cache rate + estimated cost | Same |
 | **OpenClaw** | Context % + input/output/cache + calls | Total + calls |
+| **Reasonix** | Input/output/cache + calls + cache rate + estimated cost | Same |
+| **DeepSeek TUI** | Total + sessions + tool calls + estimated cost | Same |
 
 ### Data sources
 
@@ -449,6 +542,8 @@ clawhub uninstall agent-usage-stats
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | CodeX | `~/.codex/state_*.sqlite` → threads table + `~/.codex/sessions/**/*.jsonl` → token_count events |
 | OpenClaw | `~/.openclaw/agents/main/sessions/` |
+| Reasonix | `~/.reasonix/usage.jsonl` |
+| DeepSeek TUI | `~/.deepseek/sessions/*.json` |
 
 ### Windows + WSL2
 
@@ -533,12 +628,9 @@ token-stats -a hermes,claude-code --month
 ```bash
 # Step 1: Clean up global command + PATH (automatic)
 token-stats --uninstall
-
-# Step 2: Remove skill files
-clawhub uninstall agent-usage-stats
 ```
 
-> `--uninstall` automatically removes the wrapper, cleans the PATH entry, and deletes config files. Works on all platforms.
+> `--uninstall` automatically removes the wrapper, cleans the PATH entry, deletes config files, and removes the `~/.token-stats/` install directory. Works on all platforms.
 
 ---
 
@@ -552,7 +644,7 @@ clawhub uninstall agent-usage-stats
 
 | Requirement | Details |
 |-------------|---------|
-| Python | 3.8+ (stdlib only, no pip dependencies) |
+| Python | 3.11+ (stdlib only, no pip dependencies) |
 | Node.js | Required only for installation (ClawHub CLI) |
 
 ---
@@ -604,17 +696,17 @@ python: can't open file 'C:\\Users\\xxx\\~\\skills\\...': No such file or direct
 **Fix: use `$HOME` instead of `~`:**
 ```powershell
 # ❌ Wrong
-python ~\token-stats\token-stats.py setup
+python ~\skills\agent-usage-stats\token-stats.py setup
 
 # ✅ Correct
-python $HOME\token-stats\token-stats.py setup
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```
 
 > `$HOME` is a built-in PowerShell variable that always expands to the current user directory.
 
 #### ❓ `token-stats` command not found
 
-**Cause 1: Haven't run `setup` yet** → Follow the install steps above.
+**Cause 1: Haven't run `setup` yet** → Follow the ClawHub install steps above.
 
 **Cause 2: Ran `setup` but haven't opened a new terminal** → `setup` writes PATH to system config. Open a new terminal for it to take effect.
 
@@ -622,19 +714,19 @@ python $HOME\token-stats\token-stats.py setup
 
 **macOS (zsh):**
 ```bash
-echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.zshrc
+echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **Linux (bash):**
 ```bash
-echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 **Windows (PowerShell, current session only):**
 ```powershell
-$env:PATH += ';' + "$env:USERPROFILE\.local\bin"
+$env:PATH += ';' + "$env:USERPROFILE\.token-stats\bin"
 ```
 
 #### ❓ `Permission denied` when running `token-stats`
@@ -642,9 +734,9 @@ $env:PATH += ';' + "$env:USERPROFILE\.local\bin"
 **macOS / Linux only. Cause: wrapper script lacks execute permission.**
 
 ```bash
-chmod +x ~/.local/bin/token-stats
+chmod +x ~/.token-stats/bin/token-stats
 # Or just re-run setup
-python3 ~/token-stats/token-stats.py setup
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
 > Windows users are not affected (`.cmd` files don't need execute permission).
@@ -701,12 +793,13 @@ token-stats -a hermes --export
 
 **Fix for all OSes:**
 ```bash
-git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
-python3 ~/token-stats/token-stats.py setup   # Windows: python $HOME\token-stats\...
+cd ~
+clawhub install agent-usage-stats --force
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 token-stats --version
 ```
 
-This ensures the tool is installed to `~/token-stats/` — the predictable home-directory location.
+This ensures the tool is installed to `~/.token-stats/` — the predictable home-directory location.
 
 #### ❓ OpenClaw shows calls but zero tokens
 

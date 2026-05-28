@@ -1,156 +1,283 @@
-#!/usr/bin/env python
-"""回归测试脚本 — 覆盖 README 80%+ 命令，跨平台（Windows/Linux/macOS）
-用法: python test_regression.py
+#!/usr/bin/env python3
+"""token-stats regression test runner.
+
+Runs non-destructive smoke/regression checks against available local Agent data.
+Install, update, and uninstall are covered only with temporary HOME/PATH fixtures.
 """
 
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
 import subprocess
 import sys
-import os
+import tempfile
+from datetime import date, timedelta
 from pathlib import Path
 
-# 确保 stdout 能处理 UTF-8（Windows GBK 终端写 emoji 会崩）
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-else:
-    sys.stdout = open(sys.stdout.fileno(), mode="w", encoding="utf-8", errors="replace", closefd=False)
 
-SCRIPT = str(Path(__file__).resolve().parent / "token-stats.py")
-OUT = str(Path(__file__).resolve().parent)
-
-def sep(title):
-    print(f"\n{'#' * 70}")
-    print(f"#  {title}")
-    print(f"{'#' * 70}\n")
-
-def run(cmd, timeout=30, stdin=None):
-    print(f"$ {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-    print()
-    try:
-        env = os.environ.copy()
-        env.setdefault("PYTHONIOENCODING", "utf-8")
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, input=stdin,
-            encoding="utf-8", errors="replace", env=env
-        )
-        out = r.stdout + r.stderr
-        print(out if out.strip() else "(无输出)")
-        if r.returncode != 0:
-            print(f"[退出码: {r.returncode}]")
-    except subprocess.TimeoutExpired:
-        print("(超时)")
-    except FileNotFoundError:
-        print(f"[错误: 找不到命令 — {cmd[0]}]")
-    print()
-
+ROOT = Path(__file__).resolve().parent
+SCRIPT = ROOT / "token-stats.py"
 PY = [sys.executable]
 
-# ══════════════════════════════════════════════════════════════
-# 1. 基础信息
-# ══════════════════════════════════════════════════════════════
-sep("1. 版本信息")
-run(PY + [SCRIPT, "--version"])
 
-sep("2. 已安装 Agent 列表")
-run(PY + [SCRIPT, "-l"])
+class Runner:
+    def __init__(self, *, keep_exports: bool = False):
+        self.keep_exports = keep_exports
+        self.failures: list[str] = []
+        self.export_dir = Path(tempfile.mkdtemp(prefix="token-stats-regression-export-"))
 
-# ══════════════════════════════════════════════════════════════
-# 2. 单 Agent 快照（默认 / 时间段）
-# ══════════════════════════════════════════════════════════════
-sep("4. Claude Code 全部历史")
-run(PY + [SCRIPT, "-a", "claude-code"])
+    def close(self):
+        if self.keep_exports:
+            print(f"\n导出文件保留在: {self.export_dir}")
+        else:
+            shutil.rmtree(self.export_dir, ignore_errors=True)
 
-sep("5. Hermes 全部历史")
-run(PY + [SCRIPT, "-a", "hermes"])
+    def sep(self, title: str):
+        print(f"\n{'#' * 78}\n# {title}\n{'#' * 78}\n")
 
-sep("6. Claude Code 今日 (-t)")
-run(PY + [SCRIPT, "-a", "claude-code", "-t"])
+    def run(self, name: str, cmd: list[str], *, timeout: int = 45, stdin: str | None = None,
+            env: dict[str, str] | None = None, expect: list[str] | None = None,
+            allow_fail: bool = False) -> subprocess.CompletedProcess:
+        print(f"$ {' '.join(str(c) for c in cmd)}")
+        run_env = os.environ.copy()
+        run_env.setdefault("PYTHONIOENCODING", "utf-8")
+        if env:
+            run_env.update(env)
+        try:
+            result = subprocess.run(
+                [str(c) for c in cmd],
+                capture_output=True,
+                text=True,
+                input=stdin,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
+                env=run_env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            print("(超时)")
+            self.failures.append(f"{name}: timeout after {timeout}s")
+            return subprocess.CompletedProcess(cmd, 124, exc.stdout or "", exc.stderr or "")
 
-sep("7. Claude Code 昨日 (--yesterday)")
-run(PY + [SCRIPT, "-a", "claude-code", "--yesterday"])
+        output = (result.stdout or "") + (result.stderr or "")
+        print(output.strip() or "(无输出)")
+        print()
 
-sep("8. Claude Code 本周 (--week)")
-run(PY + [SCRIPT, "-a", "claude-code", "--week"])
+        failed = result.returncode != 0 and not allow_fail
+        if "读取失败" in output or "Traceback" in output:
+            self.failures.append(f"{name}: unexpected runtime error output")
+            failed = True
+        if expect:
+            for needle in expect:
+                if needle not in output:
+                    self.failures.append(f"{name}: missing expected output: {needle}")
+                    failed = True
+        if failed:
+            self.failures.append(f"{name}: exit code {result.returncode}")
+        return result
 
-sep("9. Claude Code 最近7天 (--last-7d)")
-run(PY + [SCRIPT, "-a", "claude-code", "--last-7d"])
+    def smoke(self):
+        self.sep("1. 基础 CLI 与模块导入")
+        self.run("py_compile", PY + ["-m", "py_compile", str(SCRIPT)] + [str(p) for p in sorted((ROOT / "token_stats").glob("*.py"))])
+        self.run("version", PY + [SCRIPT, "--version"], expect=["token-stats v"])
+        self.run("help", PY + [SCRIPT, "--help"], expect=["命令大全", "--today", "--compare"])
+        self.run("list_backends", PY + [SCRIPT, "--list-backends"], expect=["本机已安装"])
 
-sep("10. Claude Code 本月 (-m)")
-run(PY + [SCRIPT, "-a", "claude-code", "-m"])
+    def _detect_agents(self) -> list[str]:
+        backends = self.run("detect_backends", PY + [SCRIPT, "--list-backends"]).stdout
+        detected = []
+        for name, marker in [
+            ("claude-code", "Claude Code"),
+            ("codex", "CodeX"),
+            ("hermes", "Hermes"),
+            ("openclaw", "OpenClaw"),
+            ("reasonix", "Reasonix"),
+            ("deepseek-tui", "DeepSeek TUI"),
+        ]:
+            if f"✅ {marker}" in backends:
+                detected.append(name)
+        return detected
 
-sep("11. Claude Code 本年 (-y)")
-run(PY + [SCRIPT, "-a", "claude-code", "-y"])
+    def _choose_primary_agent(self, agents: list[str]) -> str | None:
+        for name in agents:
+            result = self.run(f"probe_{name}", PY + [SCRIPT, "-a", name, "--month"], allow_fail=True)
+            output = (result.stdout or "") + (result.stderr or "")
+            if result.returncode == 0 and any(marker in output for marker in ("合计", "调用", "轮会话", "工具调用")):
+                return name
+        return agents[0] if agents else None
 
-sep("12. Claude Code 日期范围 (--from --to)")
-run(PY + [SCRIPT, "-a", "claude-code", "--from", "2026-05-20", "--to", "2026-05-24"])
+    def real_data(self):
+        self.sep("2. README 核心命令回归")
+        preferred = self._detect_agents()
 
-# ══════════════════════════════════════════════════════════════
-# 3. --all 模式
-# ══════════════════════════════════════════════════════════════
-sep("13. 全部 Agent 全部历史")
-run(PY + [SCRIPT, "--all"])
+        if not preferred:
+            self.failures.append("real_data: no supported local Agent detected")
+            return
 
-sep("14. 全部 Agent 今日 (--all -t)")
-run(PY + [SCRIPT, "--all", "-t"])
+        primary = self._choose_primary_agent(preferred)
+        if not primary:
+            self.failures.append("real_data: no primary Agent selected")
+            return
+        print(f"检测到可用 Agent: {', '.join(preferred)}；主回归 Agent: {primary}\n")
+        today = date.today()
+        month_start = today.replace(day=1)
+        month_mid = month_start + (today - month_start) // 2
+        second_half_start = month_mid + timedelta(days=1)
 
-sep("15. 全部 Agent 本月 (--all -m)")
-run(PY + [SCRIPT, "--all", "-m"])
+        snapshot_commands = [
+            ("primary_all_history", ["-a", primary], ["📊"]),
+            ("primary_now", ["-a", primary, "--now"], ["📊"]),
+            ("primary_detail", ["-a", primary, "--detail"], ["📊"]),
+            ("primary_today", ["-a", primary, "--today"], None),
+            ("primary_yesterday", ["-a", primary, "--yesterday"], None),
+            ("primary_week", ["-a", primary, "--week"], None),
+            ("primary_last_7d", ["-a", primary, "--last-7d"], ["📊"]),
+            ("primary_month", ["-a", primary, "--month"], ["📊"]),
+            ("primary_year", ["-a", primary, "--year"], ["📊"]),
+            ("primary_custom_range", ["-a", primary, "--from", month_start.isoformat(), "--to", today.isoformat()], ["📊"]),
+        ]
+        for name, args, expect in snapshot_commands:
+            self.run(name, PY + [SCRIPT] + args, expect=expect)
 
-# ══════════════════════════════════════════════════════════════
-# 4. 对比模式
-# ══════════════════════════════════════════════════════════════
-sep("16. Claude Code 对比 today vs yesterday")
-run(PY + [SCRIPT, "-a", "claude-code", "--compare", "--a", "today", "--b", "yesterday"])
+        compare_commands = [
+            ("compare_yesterday_today", ["-a", primary, "--compare", "--a", "yesterday", "--b", "today"]),
+            ("compare_week", ["-a", primary, "--compare", "--a", "last-week", "--b", "this-week"]),
+            ("compare_month", ["-a", primary, "--compare", "--a", "last-month", "--b", "this-month"]),
+            ("compare_year", ["-a", primary, "--compare", "--a", "last-year", "--b", "this-year"]),
+            ("compare_custom_dates", ["-a", primary, "--compare", "--a", month_start.isoformat(), "--b", today.isoformat()]),
+            (
+                "compare_custom_ranges",
+                [
+                    "-a", primary, "--compare",
+                    "--a", f"{month_start.isoformat()}~{month_mid.isoformat()}",
+                    "--b", f"{second_half_start.isoformat()}~{today.isoformat()}",
+                ],
+            ),
+        ]
+        for name, args in compare_commands:
+            result = self.run(name, PY + [SCRIPT] + args)
+            output = (result.stdout or "") + (result.stderr or "")
+            if "对比" not in output and "两个时间段均无数据" not in output:
+                self.failures.append(f"{name}: compare output missing expected summary")
 
-sep("17. Claude Code 对比 this-week vs last-week")
-run(PY + [SCRIPT, "-a", "claude-code", "--compare", "--a", "this-week", "--b", "last-week"])
+        self.run("all_history", PY + [SCRIPT, "--all"], expect=["本机 Agent 统计汇总"])
+        self.run("all_today", PY + [SCRIPT, "--all", "--today"], expect=["本机 Agent 统计汇总"])
+        self.run("all_month", PY + [SCRIPT, "--all", "--month"], expect=["全部"])
+        self.run("all_year", PY + [SCRIPT, "--all", "--year"], expect=["全部"])
+        self.run("watch_all_rejected", PY + [SCRIPT, "--all", "--watch"], expect=["--watch 仅支持单个 Agent"])
 
-sep("18. Claude Code 对比 this-month vs last-month")
-run(PY + [SCRIPT, "-a", "claude-code", "--compare", "--a", "this-month", "--b", "last-month"])
+        if len(preferred) > 1:
+            self.run("multi_agent", PY + [SCRIPT, "-a", ",".join(preferred[:2]), "--today"], expect=["全部 Agent 总计"])
+            self.run("watch_multi_rejected", PY + [SCRIPT, "-a", ",".join(preferred[:2]), "--watch"], expect=["--watch 仅支持单个 Agent"])
 
-sep("19. Claude Code 对比日期范围")
-run(PY + [SCRIPT, "-a", "claude-code", "--compare",
-     "--a", "2026-05-20~2026-05-24", "--b", "2026-05-13~2026-05-17"])
+    def exports(self):
+        self.sep("3. 导出回归")
+        backends = self.run("detect_for_export", PY + [SCRIPT, "--list-backends"]).stdout
+        primary = "codex" if "✅ CodeX" in backends else "claude-code"
+        if f"✅ {'CodeX' if primary == 'codex' else 'Claude Code'}" not in backends:
+            print("未检测到 CodeX/Claude Code，跳过单 Agent 导出；仍测试 --all 导出。")
+            primary = None
+        if primary:
+            self.run("export_xlsx", PY + [SCRIPT, "-a", primary, "--month", "--export", self.export_dir], stdin="1\n")
+            self.run("export_csv", PY + [SCRIPT, "-a", primary, "--today", "--export", self.export_dir], stdin="2\n")
+            self.run("export_json", PY + [SCRIPT, "-a", primary, "--month", "--export", self.export_dir], stdin="3\n")
+        self.run("export_all_xlsx", PY + [SCRIPT, "--all", "--year", "--export", self.export_dir], stdin="1\n")
 
-# ══════════════════════════════════════════════════════════════
-# 5. 详细模式
-# ══════════════════════════════════════════════════════════════
-sep("20. Claude Code 详细模式 (--detail)")
-run(PY + [SCRIPT, "-a", "claude-code", "--detail"])
+        exported = list(self.export_dir.glob("*.xlsx")) + list(self.export_dir.glob("*.csv")) + list(self.export_dir.glob("*.json"))
+        if not exported:
+            self.failures.append("exports: no export files generated")
+        else:
+            print("导出文件:")
+            for path in exported:
+                print(f"  {path.name} ({path.stat().st_size} bytes)")
+                if path.stat().st_size <= 0:
+                    self.failures.append(f"exports: empty file {path.name}")
 
-# ══════════════════════════════════════════════════════════════
-# 6. 实时监控 (20秒)
-# ══════════════════════════════════════════════════════════════
-sep("21. Claude Code 实时监控 20秒 (-w 5)")
-print("(监控中，请等待 20 秒...)\n")
-run(PY + [SCRIPT, "-a", "claude-code", "-w", "5"], timeout=22)
+    def install_maintenance(self):
+        self.sep("4. 安装/更新/卸载维护流回归（临时 HOME）")
+        with tempfile.TemporaryDirectory(prefix="token-stats-install-home-") as home_tmp, \
+                tempfile.TemporaryDirectory(prefix="token-stats-fake-bin-") as bin_tmp:
+            home = Path(home_tmp)
+            fake_bin = Path(bin_tmp)
+            zshrc = home / ".zshrc"
+            zshrc.write_text("# test shell rc\n", encoding="utf-8")
+            fake_clawhub = fake_bin / "clawhub"
+            fake_clawhub.write_text("#!/bin/sh\necho \"fake clawhub $@\"\nexit 0\n", encoding="utf-8")
+            fake_clawhub.chmod(0o755)
+            env = {
+                "HOME": str(home),
+                "SHELL": "/bin/zsh",
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            }
 
-# ══════════════════════════════════════════════════════════════
-# 7. 导出
-# ══════════════════════════════════════════════════════════════
-sep("22. 导出 XLSX (Claude Code 本月)")
-run(PY + [SCRIPT, "-a", "claude-code", "--month", "-e", OUT])
+            setup = self.run(
+                "setup_temp_home",
+                PY + [SCRIPT, "setup"],
+                env=env,
+                expect=["已创建全局命令", "已添加到 PATH", "token-stats --version"],
+            )
+            install_dir = home / ".token-stats"
+            wrapper = install_dir / "bin" / ("token-stats.cmd" if sys.platform == "win32" else "token-stats")
+            if setup.returncode == 0:
+                if not wrapper.exists():
+                    self.failures.append("setup_temp_home: command wrapper was not created")
+                if not (install_dir / "token-stats.py").exists():
+                    self.failures.append("setup_temp_home: entry script was not copied")
+                if sys.platform != "win32" and ".token-stats/bin" not in zshrc.read_text(encoding="utf-8"):
+                    self.failures.append("setup_temp_home: PATH block missing from .zshrc")
 
-sep("23. 导出 XLSX (全部 Agent 本年)")
-run(PY + [SCRIPT, "--all", "--year", "-e", OUT])
+            if wrapper.exists():
+                wrapper.unlink()
+            self.run(
+                "update_repairs_wrapper",
+                PY + [SCRIPT, "update"],
+                env=env,
+                expect=["fake clawhub update agent-usage-stats", "已检查全局命令"],
+            )
+            if not wrapper.exists():
+                self.failures.append("update_repairs_wrapper: wrapper was not repaired")
 
-sep("24. 导出 CSV (Claude Code 今日)")
-run(PY + [SCRIPT, "-a", "claude-code", "-t", "-e", OUT], stdin="2\n")
+            self.run(
+                "uninstall_temp_home",
+                PY + [SCRIPT, "--uninstall"],
+                env=env,
+                expect=["卸载完成"],
+            )
+            if wrapper.exists():
+                self.failures.append("uninstall_temp_home: wrapper still exists")
+            if install_dir.exists():
+                self.failures.append("uninstall_temp_home: install dir still exists")
+            if sys.platform != "win32" and "token-stats PATH" in zshrc.read_text(encoding="utf-8"):
+                self.failures.append("uninstall_temp_home: PATH block still exists")
 
-sep("25. 导出 JSON (Claude Code 本月)")
-run(PY + [SCRIPT, "-a", "claude-code", "--month", "-e", OUT], stdin="3\n")
+    def summary(self) -> int:
+        self.sep("测试结论")
+        if self.failures:
+            print("发现问题:")
+            for item in self.failures:
+                print(f"  - {item}")
+            return 1
+        print("所有回归检查通过。")
+        return 0
 
-# ══════════════════════════════════════════════════════════════
-# 完成
-# ══════════════════════════════════════════════════════════════
-sep("回归测试完成 — 导出文件列表")
-exported = list(Path(OUT).glob("*.xlsx")) + \
-           list(Path(OUT).glob("*.csv")) + \
-           list(Path(OUT).glob("*.json"))
-if exported:
-    for f in exported:
-        size = f.stat().st_size
-        print(f"  {f.name}  ({size / 1024:.1f} KB)")
-else:
-    print("  (无导出文件)")
 
-print("\n导出文件已保留在当前目录，请手动检查后删除")
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run token-stats regression tests")
+    parser.add_argument("--keep-exports", action="store_true", help="保留临时导出文件")
+    args = parser.parse_args()
+
+    runner = Runner(keep_exports=args.keep_exports)
+    try:
+        runner.smoke()
+        runner.real_data()
+        runner.exports()
+        runner.install_maintenance()
+        return runner.summary()
+    finally:
+        runner.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

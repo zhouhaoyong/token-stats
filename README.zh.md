@@ -1,6 +1,6 @@
 # token-stats — AI Agent Token 消耗统计工具
 
-统计本机 AI 编程助手的 token 消耗，支持多 Agent、多模型、多时间段查询与导出。
+统计当前设备上 AI 编程助手的 token 消耗，支持多 Agent、多模型、多时间段查询与导出。
 
 ## 为什么选择 token-stats
 
@@ -11,7 +11,7 @@
 | **Token 消耗统计** — 指定时间范围 | `token-stats -a claude-code --month` | 多 Agent（Claude Code / CodeX / Hermes / OpenClaw / Reasonix / DeepSeek TUI）、多模型，输入/输出/缓存 token 和调用次数，有数据才展示 |
 | **实时监控** — 上下文占比追踪 | `token-stats -a claude-code --watch` | 每轮增量 + 累计量，超 90% 预警，macOS / Linux / Windows 通用 |
 | **时段对比** — 两个时间段并排比较 | `--compare --a yesterday --b today` | 任意时间段聚合，多模型横向对比，带差值列 |
-| **数据导出** — XLSX / JSON | `--export` | 多 Agent、多时间段组合，交互式选目录；年度按月拆分 |
+| **数据导出** — XLSX / CSV / JSON | `--export` | 多 Agent、多时间段组合，交互式选目录；年度按月拆分 |
 | **模型识别** — 中转站 API 校验 | `token-stats -a <name>` | 自动识别 API 返回的模型名称（69 个模型 13 个厂商） |
 
 ---
@@ -62,14 +62,14 @@ clawhub -V          # 显示版本号
 
 ### 数据范围
 
-> ⚠️ `token-stats` **仅统计本机数据，不跨机器汇总**。
+> ⚠️ `token-stats` **仅统计当前设备的数据，不跨机器汇总**。
 >
 > - **同一把 API Key 用在多台机器 → 每台机器的统计互不相通**
 > - 例：API Key 同时在 PC A 和 PC B 用，PC A 的 `token-stats` 只看得到 PC A 的用量
-> - `token-stats` 不联网、不查 API 后台，纯读本地磁盘文件
+> - `token-stats` 不联网、不查 API 后台，纯读当前设备上的数据文件
 > - 要看另一台机器的统计，请在那台机器上也安装 `token-stats`
 >
-> 🕐 **时区说明**：`--today` / `--yesterday` 等时间段基于**本机系统时区**。例如北京时间 (UTC+8) 的 `--today` 统计范围为当日 00:00~23:59 CST。跨时区机器看到的数据范围不同。
+> 🕐 **时区说明**：`--today` / `--yesterday` 等时间段基于**系统时区**。例如北京时间 (UTC+8) 的 `--today` 统计范围为当日 00:00~23:59 CST。跨时区机器看到的数据范围不同。
 
 ### API 中转站
 
@@ -116,55 +116,56 @@ API 返回 usage → Agent 写入本地 → token-stats 读取汇总
 
 ## 安装
 
-安装到用户主目录 `~/token-stats/`（所有系统都有写入权限，相当于全局安装）：
+通过 **ClawHub** 安装。安装后再执行一次 `setup`，它会把运行文件复制到 `~/.token-stats/`，创建 `~/.token-stats/bin/token-stats`，并将 `~/.token-stats/bin` 加入 PATH。
 
 **macOS / Linux：**
 ```bash
-git clone https://github.com/zhouhaoyong/token-stats.git ~/token-stats
-python3 ~/token-stats/token-stats.py setup
+cd ~
+clawhub install agent-usage-stats
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
 **Windows（PowerShell）：**
 ```powershell
-git clone https://github.com/zhouhaoyong/token-stats.git $HOME\token-stats
-python $HOME\token-stats\token-stats.py setup
+cd $HOME
+clawhub install agent-usage-stats
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```
 
-> 没有 git？也可以从 [GitHub Releases](https://github.com/zhouhaoyong/token-stats/releases) 下载 ZIP 解压到 `~/token-stats/`。
-> 如果 `python` 找不到，试试 `python3`（Microsoft Store 版 Python 用 `python3`）。
-> 如果报错 `can't open file '...~...'`，参考：[PowerShell 路径展开问题](#ps-tilde)。
->
-> `setup` 会自动将 `~/.local/bin` 加入系统 PATH，**需要新开一个终端窗口**才能生效。
+更新：
+
+```bash
+token-stats update
+# 或者先更新 ClawHub 技能，再重新 setup
+clawhub update agent-usage-stats
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+```
+
+卸载：
+
+```bash
+token-stats --uninstall
+```
+
+如需同时移除 ClawHub 下载的技能目录，可删除 `~/skills/agent-usage-stats/`。
 
 安装完成后，新开终端即可使用 `token-stats` 命令。
 
 ### 更新
 
-根据安装方式选择对应的更新方法：
-
-**方式一：git clone 安装**（推荐）
-```bash
-cd ~/token-stats && git pull
-```
-> 更新后 `setup` 创建的包装器（`~/.local/bin/token-stats`）自动指向最新文件，无需重新 setup。
-
-**方式二：ClawHub 安装**
 ```bash
 token-stats update
 ```
-> 内部调用 `clawhub update agent-usage-stats`，拉取新版本后复制到安装目录。
-
-> **ClawHub 用户**也可通过 `clawhub install agent-usage-stats --dir ~` 安装，然后执行
-> `python3 ~/skills/agent-usage-stats/token-stats.py setup`。
+> 内部调用 `clawhub update agent-usage-stats`，拉取新版本后复制到 `~/.token-stats/`。
 
 ### 验证安装成功
 
 ```bash
 # 验证 1：版本号
 token-stats --version
-# 输出: token-stats v2.6.0
+# 输出: token-stats v2.7.0
 
-# 验证 2：看本机已安装的 Agent
+# 验证 2：看已检测到的 Agent
 token-stats --list-backends
 # 输出示例:
 #   ✅ Claude Code
@@ -175,12 +176,13 @@ token-stats --list-backends
 #   ✅ DeepSeek TUI
 
 # 验证 3：直接看某个 Agent 的统计
-token-stats -a claude-code
+token-stats -a claude-code --month
 # 输出示例:
 # 📊 Claude Code
-#   Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131     | 缓 0               | 总计/+缓存 23.04K/23.04K | 调用 1 次    | -
-#   deepseek-v4-flash                     | 入 2.59M  | 出 102.93K | 缓 12.65M (83.0%)  | 总计/+缓存 2.69M/15.34M  | 调用 514 次 #   deepseek-v4-pro                       | 入 5.47M  | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次#   gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K   | 缓 0               | 总计/+缓存 90.26K/90.26K | 调用 4 次    | -
-#   合计                                  | 入 8.18M  | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次```
+#   deepseek-v4-flash | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次
+#   deepseek-v4-pro   | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次
+#   合计              | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次
+```
 
 以上三条均正常输出即表示安装成功。
 
@@ -227,10 +229,12 @@ clawhub update agent-usage-stats
 | 查看今日所有 Agent 统计 | `token-stats --all -t` | 所有 Agent |
 | 查看本月统计 | `token-stats --all -m` | 所有 Agent |
 | 查看单个 Agent | `token-stats -a claude-code` | 单个 Agent |
+| 当前快照/详细模式 | `token-stats -a claude-code --now` / `--detail` | 单个 Agent |
 | 实时监控 | `token-stats -a claude-code -w` | 单个 Agent |
 | 时段对比 | `token-stats -a claude-code --compare --a last-week --b this-week` | 单个 Agent |
 | 导出数据 | `token-stats -a claude-code -m -e` | 单个/所有 Agent |
-| 查看模型价格 | `token-stats --list-prices` | 配置查询 |
+| 列出已安装 Agent | `token-stats --list-backends` | 当前设备检测 |
+| 更新/卸载 | `token-stats update` / `token-stats --uninstall` | 工具维护 |
 | 交互式菜单 | `token-stats` | 交互式选择 |
 
 ### 参数说明
@@ -239,16 +243,25 @@ clawhub update agent-usage-stats
 |:---:|---|---|
 | `-a` | `--agent` | 指定 Agent，名称见上方 Agent 名称表。多个用逗号分隔 |
 | `-t` | `--today` | 今日数据 |
+| | `--yesterday` | 昨日数据 |
+| | `--week` | 本周数据（周一至今） |
+| | `--last-7d` | 最近 7 天数据 |
 | `-m` | `--month` | 本月数据（1 号至今） |
 | `-y` | `--year` | 今年数据（1 月 1 日至今） |
+| | `--from` / `--to` | 自定义日期范围，格式 `YYYY-MM-DD` |
 | `-w` | `--watch` | 实时监控，默认 5 秒刷新，Ctrl+C 停止 |
 | `-e` | `--export` | 导出为 XLSX / CSV / JSON |
 | `-v` | `--version` | 查看版本号 |
-| `-l` | `--list-backends` | 列出本机已安装的 Agent |
-| `--list-prices` | | 列出已配置价格的模型 |
+| `-l` | `--list-backends` | 列出当前设备已检测到的 Agent |
+| | `--compare` / `--a` / `--b` | 对比两个时间段 |
+| | `--now` / `--detail` | 当前快照/详细模式（等同默认统计） |
 | `--all` | | 查看所有 Agent 统计 |
+| | `setup` / `--setup` | 安装到 `~/.token-stats/`，创建 `~/.token-stats/bin/token-stats` 并加入 PATH |
+| | `update` / `--update` | 更新到最新版 |
+| | `--uninstall` | 删除全局命令、安装目录并清理 PATH |
 
 > 短参数可组合使用。例如 `-a claude-code -t -e` 表示导出 Claude Code 今日数据。
+> README 中的输出为脱敏示例；实际数字会因 Agent、模型、时区和使用量不同而不同。
 
 ---
 
@@ -262,17 +275,57 @@ clawhub update agent-usage-stats
 token-stats -a claude-code
 ```
 
+输出形态：
+
+```
+📊 Claude Code
+  deepseek-v4-flash | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次  | ≈¥7.63
+  deepseek-v4-pro   | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次 | ≈¥139.26
+  合计              | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次 | ≈¥146.89 (仅供参考)
+```
+
+**当前快照/详细模式（等同默认统计）：**
+
+```bash
+token-stats -a claude-code --now
+token-stats -a claude-code --detail
+```
+
+输出同默认统计，用于明确表达“查看当前快照”：
+
+```
+📊 Claude Code
+  deepseek-v4-pro | 入 13.12M | 出 6.36M | 缓 2471.2M (99.5%) | 总计/+缓存 19.47M/2490.67M | 调用 11835 次
+  合计            | 入 19.66M | 出 6.68M | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次
+```
+
 **只看今天的：**
 
 ```bash
 token-stats -a claude-code -t
 ```
 
+输出形态：
+
+```
+Claude Code: 会话文件中未解析到有效数据
+```
+
+当天没有记录时会显示无有效数据；有记录时输出表格结构与本月示例相同。
+
 **看昨天的：**
 
 ```bash
 token-stats -a claude-code --yesterday
 ```
+
+输出形态：
+
+```
+📊 Claude Code
+```
+
+某些时间段没有有效记录时，仅显示标题或无数据提示。
 
 **看本月的（1 号到今天）：**
 
@@ -286,10 +339,26 @@ token-stats -a claude-code -m
 token-stats -a claude-code --year
 ```
 
+输出形态：
+
+```
+📊 Claude Code
+  Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131   | 缓 0                | 总计/+缓存 23.04K/23.04K   | 调用 1 次
+  deepseek-v4-flash                     | 入 6.44M  | 出 320K  | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次
+  deepseek-v4-pro                       | 入 13.12M | 出 6.36M | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次
+  合计                                  | 入 19.66M | 出 6.68M | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次
+```
+
 **看本周的（周一到今天）：**
 
 ```bash
 token-stats -a claude-code --week
+```
+
+输出形态：
+
+```
+📊 Claude Code
 ```
 
 **看最近 7 天的：**
@@ -298,19 +367,33 @@ token-stats -a claude-code --week
 token-stats -a claude-code --last-7d
 ```
 
+输出形态：
+
+```
+📊 Claude Code
+  deepseek-v4-flash | 入 4.42M  | 出 242.8K | 缓 19.5M (81.5%)    | 总计/+缓存 4.66M/24.16M    | 调用 964 次
+  deepseek-v4-pro   | 入 8.12M  | 出 5.07M  | 缓 1944.99M (99.6%) | 总计/+缓存 13.2M/1958.19M  | 调用 9249 次
+  合计              | 入 12.54M | 出 5.31M  | 缓 1964.49M (99.4%) | 总计/+缓存 17.85M/1982.35M | 调用 10213 次
+```
+
 **自己指定日期范围：**
 
 ```bash
-# 从 1 月 1 号到 5 月 18 号
-token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
+# 从 5 月 1 号到 5 月 28 号
+token-stats -a claude-code --from 2026-05-01 --to 2026-05-28
 ```
 
 输出示例：
 
 ```
 📊 Claude Code
-  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次  deepseek-v4-pro   | 入 5.47M | 出 1.57M   | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次  合计              | 入 8.18M | 出 1.67M   | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次  ────────────────────────────────────
-  子代理: 24 次 | 会话: 24 个 | 项目: 4 个
+  Qwen3-Coder-30B-A3B-Instruct-MLX-4bit | 入 22.91K | 出 131     | 缓 0                | 总计/+缓存 23.04K/23.04K   | 调用 1 次     | -
+  deepseek-v4-flash                     | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次  | ≈¥7.63
+  deepseek-v4-pro                       | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次 | ≈¥139.26
+  gemma-4-26B-A4B-it-MLX-4bit           | 入 89.18K | 出 1.08K   | 缓 0                | 总计/+缓存 90.26K/90.26K   | 调用 4 次     | -
+  合计                                  | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次 | ≈¥146.89 (仅供参考)
+  ────────────────────────────────────
+  子代理: 89 次 | 会话: 65 个 | 项目: 5 个
 ```
 
 ---
@@ -322,6 +405,19 @@ token-stats -a claude-code --from 2026-01-01 --to 2026-05-18
 ```bash
 # 同时看 Hermes 和 Claude Code 本月的数据
 token-stats -a hermes,claude-code -m
+```
+
+输出形态：
+
+```
+📊 Hermes
+  deepseek-v4-flash | 入 2.03M | 出 819.69K | 缓 223.53M (99.1%) | 总计/+缓存 2.85M/226.39M | 调用 2075 次
+
+📊 Claude Code
+  deepseek-v4-pro   | 入 13.12M | 出 6.36M | 缓 2471.2M (99.5%) | 总计/+缓存 19.47M/2490.67M | 调用 11835 次
+
+全部 Agent 总计
+  入 34.97M | 出 7.66M | 缓 2722.59M (98.5%) | 总计/+缓存 42.62M/2765.21M | 调用 15546 次
 ```
 
 **一次性看电脑上所有 Agent 的数据：**
@@ -348,32 +444,39 @@ token-stats --all --year
 
 ✅ Claude Code
 📊 Claude Code
-  deepseek-v4-flash | 入 2.59M | 出 102.93K | 缓 12.65M (83.0%) | 总计/+缓存 2.69M/15.34M | 调用 514 次  deepseek-v4-pro   | 入 5.47M | 出 1.57M | 缓 588.81M (99.1%) | 总计/+缓存 7.04M/595.86M | 调用 3060 次  合计              | 入 8.18M | 出 1.67M | 缓 601.46M (98.7%) | 总计/+缓存 9.85M/611.31M | 调用 3579 次
+  deepseek-v4-flash | 入 6.44M  | 出 320.28K | 缓 27.86M (81.2%)   | 总计/+缓存 6.76M/34.62M    | 调用 1313 次  | ≈¥7.63
+  deepseek-v4-pro   | 入 13.12M | 出 6.36M   | 缓 2471.2M (99.5%)  | 总计/+缓存 19.47M/2490.67M | 调用 11835 次 | ≈¥139.26
+  合计              | 入 19.66M | 出 6.68M   | 缓 2499.06M (99.2%) | 总计/+缓存 26.34M/2525.4M  | 调用 13153 次 | ≈¥146.89 (仅供参考)
+
 ✅ CodeX
 📊 CodeX
-  codex-auto-review | 总计 11.87K | 3 轮会话
-  deepseek-v4-pro   | 4 轮会话
-  gpt-5.4           | 总计 5.26M | 2 轮会话
-  gpt-5.5           | 总计 26.59M | 4 轮会话
-  合计              | 总计 31.86M | 13 轮会话
+  gpt-5.5           | 入 4.05M   | 出 357.25K | 缓 70.33M (94.6%)  | 总计/+缓存 4.4M/74.73M    | 调用 755 次 | ≈¥1499.10
+  codex-auto-review | 入 53.29K  | 出 994     | 缓 218.11K (80.4%) | 总计/+缓存 54.28K/272.39K | 调用 9 次   | ≈¥0.00
+  gpt-5.4           | 入 996.02K | 出 117.15K | 缓 9.12M (90.2%)   | 总计/+缓存 1.11M/10.24M   | 调用 196 次 | ≈¥113.47
+  合计              | 入 5.1M    | 出 475.39K | 缓 79.67M (94.0%)  | 总计/+缓存 5.57M/85.24M   | 调用 960 次 | ≈¥1612.57 (仅供参考)
 
 ✅ Hermes
 📊 Hermes
-  deepseek-v4-flash | 上下文 92.42K/1.05M (8.8% ✅) | 入 83.5K | 出 8.92K | 缓 969.22K (92.1%) | 总计/+缓存 92.42K/1.06M | 调用 29 次
+  deepseek-v4-flash    | >100% | 2.85M/1.05M    | 入 2.03M  | 出 819.69K | 缓 223.53M (99.1%) | 总计/+缓存 2.85M/226.39M  | 调用 2075 次 | ≈¥8.14
+  qwen/qwen3.6-35b-a3b | >100% | 13.43M/131.07K | 入 13.27M | 出 156.06K | 缓 0               | 总计/+缓存 13.43M/13.43M  | 调用 318 次  | -
+  合计                 |       |                | 入 15.31M | 出 975.75K | 缓 223.53M (93.6%) | 总计/+缓存 16.28M/239.82M | 调用 2393 次 | ≈¥8.14 (仅供参考)
+
 ✅ Reasonix
 📊 Reasonix
-  deepseek-v4-flash | 入 189.67K | 出 4.93K | 缓 162.18K (85.5%) | 总计/+缓存 194.6K/356.77K | 调用 14 次
+  deepseek-v4-flash | 入 189.67K | 出 4.93K | 缓 162.18K (85.5%) | 总计/+缓存 194.6K/356.77K | 调用 14 次 | ≈¥0.04
+
 ✅ DeepSeek TUI
 📊 DeepSeek TUI
-  deepseek-v4-pro | 总计 499.88K | 1 轮会话 | 工具调用 14 次
+  deepseek-v4-pro | 总计 499.88K | 1 轮会话 | 工具调用 14 次 | ≈¥0.1477
 
 ══════════════════════════════════════════════════
   全部 Agent 总计
-  入 40.81M | 出 1.69M | 缓 602.59M (93.7%) | 总计/+缓存 42.5M/645.09M | 调用 3636 次```
+  入 40.76M | 出 8.13M | 缓 2802.43M (98.6%) | 总计/+缓存 48.89M/2851.32M | 调用 16521 次 | ≈¥1769.15 (仅供参考)
+```
 
 ---
 
-### 三、列出本机已安装的 Agent
+### 三、列出已安装的 Agent
 
 ```bash
 # 短参数
@@ -409,6 +512,13 @@ token-stats --list-backends
 token-stats -a claude-code --compare --a yesterday --b today
 ```
 
+输出形态：
+
+```
+📊 对比: 2026-05-28 vs 2026-05-29  [Claude Code]
+  两个时间段均无数据
+```
+
 **上周和这周比：**
 
 ```bash
@@ -427,6 +537,15 @@ token-stats -a claude-code --compare --a last-month --b this-month
 token-stats -a claude-code --compare --a last-year --b this-year
 ```
 
+输出形态：
+
+```
+📊 对比: 2025-01-01~2025-12-31 vs 2026-01-01~2026-12-31  [Claude Code]
+  deepseek-v4-pro | 总计         | 0 | 19471960   | +19.47M
+                  | 调用         | 0 | 11835      | +11.84K
+  合计            | 总计(含缓存) | 0 | 2525403348 | +2525.4M
+```
+
 **两个自定义日期比：**
 
 ```bash
@@ -439,37 +558,37 @@ token-stats -a claude-code --compare --a 2026-01-01~2026-01-07 --b 2026-01-08~20
 
 支持的标签：`today` / `yesterday` / `this-week` / `last-week` / `this-month` / `last-month` / `this-year` / `last-year` / `YYYY-MM-DD` / `YYYY-MM-DD~YYYY-MM-DD`
 
-输出示例：
+输出示例（`token-stats -a claude-code --compare --a last-month --b this-month`）：
 
 ```
-📊 对比: 2026-05-22 vs 2026-05-23  [Claude Code]
-=========================================================================
-  模型              | 指标         | 2026-05-22 | 2026-05-23 | 变化
-─────────────────────────────────────────────────────────────────────────
-  deepseek-v4-flash | 入           | 0          | 570063     | +570.06K
-                    | 出           | 0          | 25455      | +25.45K
-                    | 缓           | 0          | 4281600    | +4.28M
-                    | 缓存率       | -          | 88.3%      |
-                    | 总计         | 0          | 595518     | +595.52K
-                    | 总计(含缓存) | 0          | 4877118    | +4.88M
-                    | 调用         | 0          | 165        | +165
-  ·······································································
-  deepseek-v4-pro   | 入           | 56667      | 424426     | +367.76K
-                    | 出           | 8416       | 277165     | +268.75K
-                    | 缓           | 549120     | 62059648   | +61.51M
-                    | 缓存率       | 90.6%      | 99.3%      |
-                    | 总计         | 65083      | 701591     | +636.51K
-                    | 总计(含缓存) | 614203     | 62761239   | +62.15M
-                    | 调用         | 18         | 456        | +438
-  ·······································································
-  合计              | 入           | 56667      | 994489     | +937.82K
-                    | 出           | 8416       | 302620     | +294.2K
-                    | 缓           | 549120     | 66341248   | +65.79M
-                    | 缓存率       | 90.6%      | 98.5%      |
-                    | 总计         | 65083      | 1297109    | +1.23M
-                    | 总计(含缓存) | 614203     | 67638357   | +67.02M
-                    | 调用         | 18         | 621        | +603
-─────────────────────────────────────────────────────────────────────────
+📊 对比: 2026-04-01~2026-04-30 vs 2026-05-01~2026-05-28  [Claude Code]
+====================================================================================================================
+  模型                                  | 指标         | 2026-04-01~2026-04-30 | 2026-05-01~2026-05-28 | 变化
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  deepseek-v4-flash                     | 入           | 0                     | 6435411               | +6.44M
+                                        | 出           | 0                     | 320278                | +320.28K
+                                        | 缓           | 0                     | 27863808              | +27.86M
+                                        | 缓存率       | -                     | 81.2%                 |
+                                        | 总计         | 0                     | 6755689               | +6.76M
+                                        | 总计(含缓存) | 0                     | 34619497              | +34.62M
+                                        | 调用         | 0                     | 1313                  | +1.31K
+  ··················································································································
+  deepseek-v4-pro                       | 入           | 0                     | 13116946              | +13.12M
+                                        | 出           | 0                     | 6355014               | +6.36M
+                                        | 缓           | 0                     | 2471198592            | +2471.2M
+                                        | 缓存率       | -                     | 99.5%                 |
+                                        | 总计         | 0                     | 19471960              | +19.47M
+                                        | 总计(含缓存) | 0                     | 2490670552            | +2490.67M
+                                        | 调用         | 0                     | 11835                 | +11.84K
+  ··················································································································
+  合计                                  | 入           | 0                     | 19664445              | +19.66M
+                                        | 出           | 0                     | 6676503               | +6.68M
+                                        | 缓           | 0                     | 2499062400            | +2499.06M
+                                        | 缓存率       | -                     | 99.2%                 |
+                                        | 总计         | 0                     | 26340948              | +26.34M
+                                        | 总计(含缓存) | 0                     | 2525403348            | +2525.4M
+                                        | 调用         | 0                     | 13153                 | +13.15K
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
 ---
@@ -575,6 +694,16 @@ echo 3 | token-stats -a claude-code -m -e ~/Desktop
 
 ---
 
+输出形态：
+
+```
+选择导出格式:
+  [1] XLSX（默认）
+  [2] CSV
+  [3] JSON
+请选择 (1/2/3, 回车=1): ✅ 已导出到: /path/to/token-stats_claude-code_20260529_001709.csv
+```
+
 ### 七、交互式菜单
 
 不带任何参数直接运行，弹出菜单选择要查看的 Agent。
@@ -611,6 +740,22 @@ token-stats
 token-stats --help
 ```
 
+输出形态：
+
+```
+usage: token-stats.py [-h] [-v] [-l] [-a AGENT] [-w [秒]] [-t] [--yesterday] ...
+
+命令大全:
+  基础:
+    token-stats                       交互式菜单选择 Agent → 查看统计
+    token-stats -a <name>             直接指定 Agent
+  快速时间段:
+    token-stats -a <name> -t / --today
+    token-stats -a <name> -m / --month
+  对比:
+    token-stats -a <name> --compare --a today --b yesterday
+```
+
 **查看当前版本号：**
 
 ```bash
@@ -619,10 +764,23 @@ token-stats -v
 token-stats --version
 ```
 
+输出：
+
+```
+token-stats v2.7.0
+```
+
 **把 token-stats 更新到最新版：**
 
 ```bash
 token-stats update
+```
+
+输出形态：
+
+```
+🔄 正在通过 ClawHub 更新 agent-usage-stats...
+✅ 已更新 token-stats 到: ~/.token-stats
 ```
 
 如果更新后版本号没变，用强制重装：
@@ -634,11 +792,29 @@ clawhub install agent-usage-stats --force
 **卸载 token-stats：**
 
 ```bash
-# 第 1 步：清理全局命令 + PATH
 token-stats --uninstall
+```
 
-# 第 2 步：移除技能文件
-clawhub uninstall agent-usage-stats
+输出形态：
+
+```
+🗑️ 正在卸载 token-stats...
+✅ 已删除全局命令
+✅ 已删除安装目录
+✅ 卸载完成
+```
+
+**ClawHub 安装后执行 setup：**
+
+```bash
+python3 ~/skills/agent-usage-stats/token-stats.py setup
+```
+
+输出形态：
+
+```
+✅ 已安装 token-stats 到: ~/.token-stats
+✅ 已创建全局命令: ~/.token-stats/bin/token-stats
 ```
 
 ---
@@ -707,12 +883,9 @@ Agent 跑在 WSL2 中时，`token-stats` 在 Windows 侧自动检测并读取数
 ```bash
 # 第 1 步：清理全局命令 + PATH（自动）
 token-stats --uninstall
-
-# 第 2 步：移除技能文件
-clawhub uninstall agent-usage-stats
 ```
 
-> `--uninstall` 会自动删除包装器、清理 PATH 条目、删除配置文件。三平台统一。
+> `--uninstall` 会自动删除包装器、清理 PATH 条目、删除配置文件和 `~/.token-stats/` 安装目录。三平台统一。
 
 ---
 
@@ -778,17 +951,17 @@ python: can't open file 'C:\\Users\\xxx\\~\\skills\\...': No such file or direct
 **解决：用 `$HOME` 替代 `~`：**
 ```powershell
 # ❌ 错误
-python ~\token-stats\token-stats.py setup
+python ~\skills\agent-usage-stats\token-stats.py setup
 
 # ✅ 正确
-python $HOME\token-stats\token-stats.py setup
+python $HOME\skills\agent-usage-stats\token-stats.py setup
 ```
 
 > `$HOME` 是 PowerShell 内置变量，始终展开为当前用户目录。
 
 #### ❓ `token-stats` 命令找不到
 
-**原因 1：还没执行 `setup`** → 按上方安装指引执行 `python $HOME\token-stats\token-stats.py setup`（Windows）或 `python3 ~/token-stats/token-stats.py setup`（macOS/Linux）。
+**原因 1：还没执行 `setup`** → 按上方 ClawHub 安装指引执行 setup。
 
 **原因 2：执行了 `setup` 但没新开终端** → `setup` 已将 PATH 写入系统配置，但当前终端不生效，新开一个终端即可。
 
@@ -796,19 +969,19 @@ python $HOME\token-stats\token-stats.py setup
 
 **macOS（zsh）：**
 ```bash
-echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.zshrc
+echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **Linux（bash）：**
 ```bash
-echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+echo 'export PATH="$PATH:$HOME/.token-stats/bin"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 **Windows（PowerShell 临时）：**
 ```powershell
-$env:PATH += ';' + "$env:USERPROFILE\.local\bin"
+$env:PATH += ';' + "$env:USERPROFILE\.token-stats\bin"
 ```
 
 #### ❓ 执行 `token-stats` 报 `Permission denied`
@@ -816,9 +989,9 @@ $env:PATH += ';' + "$env:USERPROFILE\.local\bin"
 **仅 macOS / Linux。原因：包装器脚本没有执行权限。**
 
 ```bash
-chmod +x ~/.local/bin/token-stats
+chmod +x ~/.token-stats/bin/token-stats
 # 或者重新执行 setup
-python3 ~/token-stats/token-stats.py setup
+python3 ~/skills/agent-usage-stats/token-stats.py setup
 ```
 
 > Windows 用户不受此问题影响（`.cmd` 文件不需要执行权限）。

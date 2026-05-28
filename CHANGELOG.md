@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.7.0 (2026-05-28)
+
+### 新增
+
+- **ClawHub 安装流程收敛**：安装后执行 `setup` 会把运行文件复制到 `~/.token-stats/`，创建 `~/.token-stats/bin/token-stats` 命令入口，并将 `~/.token-stats/bin` 加入 PATH
+- **安装/更新/卸载统一围绕 `~/.token-stats/`**：`token-stats update` 通过 ClawHub 拉取更新后同步到安装目录；`token-stats --uninstall` 会清理命令入口、PATH、配置文件和安装目录
+- **模块化重构**：`token-stats.py` 变为轻量入口，主逻辑拆入 `token_stats/` 包；已拆出安装文件管理、安装器、监控、快照、对比、导出、价格、日期、上下文、格式化、路径探测、菜单和渲染模块
+- **回归测试升级**：`test_regression.py` / `test_regression.sh` 改为带断言的回归脚本，覆盖编译、版本、Agent 探测、README 核心查询命令、对比和导出；安装/更新/卸载链路改为手动验证
+
+### 修复
+
+- **CodeX 月度/年度统计异常**：部分 `token_count` 事件缺少 `last_token_usage` 时不再报 `'NoneType' object is not subscriptable`，会容错读取 `total_token_usage`
+- **导出多 Agent 数据异常**：修复拆分导出模块后 `skip_model` 未导入导致的 CSV/XLSX 简单导出失败
+
 ## v2.6.8 (2026-05-27)
 
 ### 变更

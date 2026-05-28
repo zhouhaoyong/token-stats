@@ -1,7 +1,7 @@
 ---
 name: agent-usage-stats
-description: "选择要监控的 AI 助手 → 查看 token 消耗。支持 Hermes / Claude Code / CodeX / OpenClaw，每次都让你选"
-version: 2.6.8
+description: "选择要监控的 AI 助手 → 查看 token 消耗。支持 Hermes / Claude Code / CodeX / OpenClaw / Reasonix / DeepSeek TUI"
+version: 2.7.0
 author: zhy
 license: MIT
 source: https://github.com/zhy/token-stats
@@ -25,8 +25,8 @@ tags:
 ## 前置条件
 
 - Python 3.11+
-- 至少一种 Agent 有使用记录：Hermes / Claude Code / CodeX / OpenClaw
-- 安装方式：下载到 `~/token-stats/` → `python3 ~/token-stats/token-stats.py setup`
+- 至少一种 Agent 有使用记录：Hermes / Claude Code / CodeX / OpenClaw / Reasonix / DeepSeek TUI
+- 安装方式：从 clone 或解压目录运行 `python3 token-stats.py setup`，默认安装到 `~/.token-stats/`
 - 更新方式：git clone 用户 `cd ~/token-stats && git pull`，ClawHub 用户 `token-stats update`
 
 ## 用法速查
