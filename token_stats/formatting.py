@@ -141,3 +141,7 @@ def skip_model(pm: dict) -> bool:
             return True
     return False
 
+
+def is_total_mode(pm: dict) -> bool:
+    """Whether a per-model row only has a total token count, not I/O split."""
+    return (pm.get("token_mode") or pm.get("mode")) == "total"

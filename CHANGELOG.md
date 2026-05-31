@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.7.7 (2026-05-31)
+
+### 修复
+
+- **CodeX 月度/年度 token 翻倍**：部分 session JSONL 中 `last_token_usage` 存储的是累计值而非增量，按时间过滤时累加导致入/出/缓存 token 虚高约 2 倍。改为使用边界 `total_token_usage` 差值计算
+- **CodeX 缓存率展示无影响**：虽然 token 绝对值虚高，但输入和缓存同步放大，缓存率百分比本身未受影响
+
+### 维护
+
+- **CodeX 离线回归**：新增 `codex_unit_regression` 用合成数据（含重复累计事件、空事件、无 token 数据 fallback）覆盖新边界逻辑
+- 多项 total_mode（累计型 Agent）展示优化：费用跳过、导出明细格式适配
+
 ## v2.7.6 (2026-05-29)
 
 ### 修复

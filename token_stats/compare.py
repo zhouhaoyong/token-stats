@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .formatting import is_total_mode
+
 
 def run_compare(agent, a_label: str, b_label: str, helpers: dict):
     """Compare two time ranges by model and metric."""
@@ -59,7 +61,7 @@ def run_compare(agent, a_label: str, b_label: str, helpers: dict):
         b_calls = mb.get("calls", 0) or 0
         b_total = bi + bo
         b_total_cache = b_total + bc
-        if a_total == 0 and b_total == 0:
+        if a_total == 0 and b_total == 0 and ac == 0 and bc == 0 and a_calls == 0 and b_calls == 0:
             continue
         grand_ai += ai
         grand_ao += ao
@@ -70,7 +72,7 @@ def run_compare(agent, a_label: str, b_label: str, helpers: dict):
         grand_bc += bc
         grand_bcall += b_calls
 
-        pc = get_model_price(mn)
+        pc = None if is_total_mode(ma) or is_total_mode(mb) else get_model_price(mn)
         a_cost_str = f"≈¥{to_cny(calc_cost(ai, ao, ac, pc), pc.get('currency','CNY')):.2f}" if pc and (ai or ao or ac) else "-"
         b_cost_str = f"≈¥{to_cny(calc_cost(bi, bo, bc, pc), pc.get('currency','CNY')):.2f}" if pc and (bi or bo or bc) else "-"
         metrics = [
@@ -169,7 +171,8 @@ def _append_grand_total_rows(
             models_a.get(mn, {}).get("cache", 0) or 0,
             pc,
         ), pc.get("currency", "CNY"))
-        for mn in all_models if (pc := get_model_price(mn))
+        for mn in all_models
+        if not is_total_mode(models_a.get(mn, {})) and (pc := get_model_price(mn))
     )
     gt_b_cost = sum(
         to_cny(calc_cost(
@@ -178,7 +181,8 @@ def _append_grand_total_rows(
             models_b.get(mn, {}).get("cache", 0) or 0,
             pc,
         ), pc.get("currency", "CNY"))
-        for mn in all_models if (pc := get_model_price(mn))
+        for mn in all_models
+        if not is_total_mode(models_b.get(mn, {})) and (pc := get_model_price(mn))
     )
     gt_a_cost_str = f"≈¥{gt_a_cost:.2f}" if gt_a_cost > 0 else "-"
     gt_b_cost_str = f"≈¥{gt_b_cost:.2f}" if gt_b_cost > 0 else "-"

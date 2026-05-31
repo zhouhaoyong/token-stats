@@ -9,7 +9,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from .pricing import calc_cost, calc_total_cost, fmt_total_cost, get_model_price, to_cny
-from .formatting import skip_model
+from .formatting import is_total_mode, skip_model
 
 
 # ═══════════════════════════════════════════════════
@@ -241,6 +241,44 @@ def calc_cache_rate(inp: int, cache: int) -> float | None:
     return cache / inp * 100
 
 
+def _pm_total(pm: dict) -> int:
+    return int(pm.get('input', 0) or 0) + int(pm.get('output', 0) or 0)
+
+
+def _cost_for_pm(pm: dict, project_root: str) -> str:
+    if is_total_mode(pm):
+        return "-"
+    inp = int(pm.get('input', 0) or 0)
+    out = int(pm.get('output', 0) or 0)
+    cache = int(pm.get('cache', 0) or 0)
+    pc = get_price(pm.get('model', 'unknown'), project_root)
+    if not pc:
+        return "-"
+    cost_val = calc_cost(inp, out, cache, pc)
+    return f"≈¥{to_cny(cost_val, pc.get('currency', 'CNY')):.4f}"
+
+
+def _print_pm_detail(pm: dict, fmt_num, indent: str = "    "):
+    inp = pm.get("input", 0) or 0
+    out = pm.get("output", 0) or 0
+    cache = pm.get("cache", 0) or 0
+    calls = pm.get("calls", 0) or 0
+    total_tok = inp + out
+    total_w_cache = total_tok + cache
+    if is_total_mode(pm):
+        print(f"{indent}总计 tokens     {fmt_num(total_tok):>8}")
+        print(f"{indent}调用次数        {calls} 次")
+        print(f"{indent}─────────────────────────────────────")
+        print(f"{indent}总计            {fmt_num(total_tok)}")
+        return
+    print(f"{indent}输入 tokens     {fmt_num(inp):>8}")
+    print(f"{indent}输出 tokens     {fmt_num(out):>8}")
+    print(f"{indent}缓存 tokens     {fmt_num(cache):>8}")
+    print(f"{indent}调用次数        {calls} 次")
+    print(f"{indent}─────────────────────────────────────")
+    print(f"{indent}总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
+
+
 def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models, project_root):
     """单 Agent 简单 XLSX（含 Agent 列 + 合并单元格 + 合计行）。"""
     wb = _XLSXWriter()
@@ -261,13 +299,7 @@ def _write_xlsx_simple(filepath, agent_name, agent_display, filtered_models, pro
         model = pm.get('model', 'unknown')
         cr = calc_cache_rate(inp, cache)
         cr_str = f"{cr:.1f}%" if cr is not None else "-"
-        pc = get_price(model, project_root)
-        if pc:
-            cost_val = calc_cost(inp, out, cache, pc)
-            sy = "¥" if pc.get('currency','CNY')=="CNY" else "$"
-            cost_str = f"≈¥{to_cny(cost_val, pc.get('currency', 'CNY')):.4f}"
-        else:
-            cost_str = "-"
+        cost_str = _cost_for_pm(pm, project_root)
         wb.add_row(agent_display, [agent_display, model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cost_str])
         row_num += 1
     if filtered_models:
@@ -320,14 +352,9 @@ def _write_xlsx_multi_simple(filepath, results, project_root):
             model = pm.get('model', 'unknown')
             cr = calc_cache_rate(inp, cache)
             cr_str = f"{cr:.1f}%" if cr is not None else "-"
-            pc = get_price(model, project_root)
-            if pc:
-                cv = calc_cost(inp, out, cache, pc)
-                cny = to_cny(cv, pc.get('currency', 'CNY'))
-                cs = f"≈¥{cny:.4f}"
-                at_cost += cny
-            else:
-                cs = "-"
+            cs = _cost_for_pm(pm, project_root)
+            if cs.startswith("≈¥"):
+                at_cost += float(cs[2:])
             wb.add_row('MultiAgent', [agent.display_name(), model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
             ti += inp; to += out; tc += cache; tca += calls
             row_num += 1
@@ -602,14 +629,9 @@ def _write_csv_simple(filepath, agent_name, agent_display, filtered_models, proj
             model = pm.get('model', 'unknown')
             cr = calc_cache_rate(inp, cache)
             cr_str = f"{cr:.1f}%" if cr is not None else "-"
-            pc = get_price(model, project_root)
-            if pc:
-                cv = calc_cost(inp, out, cache, pc)
-                cny = to_cny(cv, pc.get('currency', 'CNY'))
-                cs = f"≈¥{cny:.4f}"
-                at_cost += cny
-            else:
-                cs = "-"
+            cs = _cost_for_pm(pm, project_root)
+            if cs.startswith("≈¥"):
+                at_cost += float(cs[2:])
             w.writerow([agent_display, model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
             ti += inp; to += out; tc += cache; tca += calls
         if len(filtered_models) > 1:
@@ -643,14 +665,9 @@ def _write_csv_multi_simple(filepath, results, project_root):
                 model = pm.get('model', 'unknown')
                 cr = calc_cache_rate(inp, cache)
                 cr_str = f"{cr:.1f}%" if cr is not None else "-"
-                pc = get_price(model, project_root)
-                if pc:
-                    cv = calc_cost(inp, out, cache, pc)
-                    cny = to_cny(cv, pc.get('currency', 'CNY'))
-                    cs = f"≈¥{cny:.4f}"
-                    at_cost += cny
-                else:
-                    cs = "-"
+                cs = _cost_for_pm(pm, project_root)
+                if cs.startswith("≈¥"):
+                    at_cost += float(cs[2:])
                 w.writerow([agent.display_name(), model, inp, out, cache, cr_str, calls, inp + out, inp + out + cache, cs])
                 ti += inp; to += out; tc += cache; tca += calls
             if len(agent_models) > 1:
@@ -814,7 +831,7 @@ def export_interactive(data, agent, *, version: str, split_months, skip_model, c
                     out = pm.get("output", 0) or 0
                     cache = pm.get("cache", 0) or 0
                     pc = get_price(mn, project_root)
-                    cost = to_cny(calc_cost(inp, out, cache, pc), pc.get('currency', 'CNY')) if pc else 0
+                    cost = 0 if is_total_mode(pm) else (to_cny(calc_cost(inp, out, cache, pc), pc.get('currency', 'CNY')) if pc else 0)
                     monthly_data[label][mn] = {
                         "input": inp, "output": out, "cache": cache,
                         "calls": pm.get("calls", 0), "cost": cost,
@@ -852,12 +869,7 @@ def export_interactive(data, agent, *, version: str, split_months, skip_model, c
                 cw = detect_context(m)
                 pct = round(total_tok / cw * 100, 1) if cw else 0
                 print(f"    上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
-            print(f"    输入 tokens     {fmt_num(inp):>8}")
-            print(f"    输出 tokens     {fmt_num(out):>8}")
-            print(f"    缓存 tokens     {fmt_num(cache):>8}")
-            print(f"    调用次数        {calls} 次")
-            print(f"    ─────────────────────────────────────")
-            print(f"    总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
+            _print_pm_detail(pm, fmt_num, indent="    ")
 
         # ── 合计（多模型时显示） ──
         if filtered_models and len(filtered_models) > 1:
@@ -868,12 +880,18 @@ def export_interactive(data, agent, *, version: str, split_months, skip_model, c
             tt = ti + to
             print(f"  {'─' * 42}")
             print(f"  合计")
-            print(f"    输入 tokens     {fmt_num(ti):>8}")
-            print(f"    输出 tokens     {fmt_num(to):>8}")
-            print(f"    缓存 tokens     {fmt_num(tc):>8}")
-            print(f"    调用次数        {tca} 次")
-            print(f"    ─────────────────────────────────────")
-            print(f"    总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
+            if any(is_total_mode(pm) for pm in filtered_models):
+                print(f"    总计 tokens     {fmt_num(tt):>8}")
+                print(f"    调用次数        {tca} 次")
+                print(f"    ─────────────────────────────────────")
+                print(f"    总计            {fmt_num(tt)}")
+            else:
+                print(f"    输入 tokens     {fmt_num(ti):>8}")
+                print(f"    输出 tokens     {fmt_num(to):>8}")
+                print(f"    缓存 tokens     {fmt_num(tc):>8}")
+                print(f"    调用次数        {tca} 次")
+                print(f"    ─────────────────────────────────────")
+                print(f"    总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
         print()
 
         # Step 1: 输入目录（如果已提供路径则跳过交互）
@@ -937,6 +955,7 @@ def export_interactive(data, agent, *, version: str, split_months, skip_model, c
                     "input_tokens": pm.get("input", 0),
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
+                    "token_mode": pm.get("token_mode", "split"),
                     "cache_ratio": round(calc_cache_rate(pm.get("input",0), pm.get("cache",0)), 1) if calc_cache_rate(pm.get("input",0), pm.get("cache",0)) is not None else None,
                     "calls": pm.get("calls", 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),
@@ -1015,7 +1034,7 @@ def export_multi(results: list[tuple], *, version: str, split_months, skip_model
                         out = pm.get("output", 0) or 0
                         cache = pm.get("cache", 0) or 0
                         pc = get_price(mn, project_root)
-                        cost = to_cny(calc_cost(inp, out, cache, pc), pc.get('currency', 'CNY')) if pc else 0
+                        cost = 0 if is_total_mode(pm) else (to_cny(calc_cost(inp, out, cache, pc), pc.get('currency', 'CNY')) if pc else 0)
                         monthly_data[label][mn] = {
                             "input": inp, "output": out, "cache": cache,
                             "calls": pm.get("calls", 0), "cost": cost,
@@ -1045,12 +1064,7 @@ def export_multi(results: list[tuple], *, version: str, split_months, skip_model
                     cw = detect_context(m)
                     pct = round(total_tok / cw * 100, 1) if cw else 0
                     print(f"      上下文          {fmt_num(total_tok):>8} / {fmt_num(cw):<8} ({pct}%)")
-                print(f"      输入 tokens     {fmt_num(inp):>8}")
-                print(f"      输出 tokens     {fmt_num(out):>8}")
-                print(f"      缓存 tokens     {fmt_num(cache):>8}")
-                print(f"      调用次数        {calls} 次")
-                print(f"      ─────────────────────────────────────")
-                print(f"      总计/+缓存     {fmt_num(total_tok)}/{fmt_num(total_w_cache)}")
+                _print_pm_detail(pm, fmt_num, indent="      ")
 
             # Agent 内合计
             if agent_models and len(agent_models) > 1:
@@ -1061,12 +1075,18 @@ def export_multi(results: list[tuple], *, version: str, split_months, skip_model
                 tt = ti + to
                 print(f"    {'─' * 42}")
                 print(f"    合计")
-                print(f"      输入 tokens     {fmt_num(ti):>8}")
-                print(f"      输出 tokens     {fmt_num(to):>8}")
-                print(f"      缓存 tokens     {fmt_num(tc):>8}")
-                print(f"      调用次数        {tca} 次")
-                print(f"      ─────────────────────────────────────")
-                print(f"      总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
+                if any(is_total_mode(pm) for pm in agent_models):
+                    print(f"      总计 tokens     {fmt_num(tt):>8}")
+                    print(f"      调用次数        {tca} 次")
+                    print(f"      ─────────────────────────────────────")
+                    print(f"      总计            {fmt_num(tt)}")
+                else:
+                    print(f"      输入 tokens     {fmt_num(ti):>8}")
+                    print(f"      输出 tokens     {fmt_num(to):>8}")
+                    print(f"      缓存 tokens     {fmt_num(tc):>8}")
+                    print(f"      调用次数        {tca} 次")
+                    print(f"      ─────────────────────────────────────")
+                    print(f"      总计/+缓存     {fmt_num(tt)}/{fmt_num(tt + tc)}")
                 grand_ti += ti; grand_to += to; grand_tc += tc; grand_tca += tca
             else:
                 pm = agent_models[0] if agent_models else {}
@@ -1144,6 +1164,7 @@ def export_multi(results: list[tuple], *, version: str, split_months, skip_model
                     "input_tokens": pm.get("input", 0),
                     "output_tokens": pm.get("output", 0),
                     "cache_tokens": pm.get("cache", 0),
+                    "token_mode": pm.get("token_mode", "split"),
                     "cache_ratio": round(calc_cache_rate(pm.get("input",0), pm.get("cache",0)), 1) if calc_cache_rate(pm.get("input",0), pm.get("cache",0)) is not None else None,
                     "calls": pm.get("calls", 0),
                     "total_tokens": pm.get("input", 0) + pm.get("output", 0),

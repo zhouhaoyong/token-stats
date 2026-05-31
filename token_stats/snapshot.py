@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .formatting import is_total_mode
+
 
 def show_all(all_agents: list, detect_installed, helpers: dict, *, from_ts: float = None, to_ts: float = None):
     skip_model = helpers["skip_model"]
@@ -49,7 +51,7 @@ def show_all(all_agents: list, detect_installed, helpers: dict, *, from_ts: floa
                         grand_to += out
                         grand_tc += cache
                         grand_tca += calls
-                        pc = get_model_price(pm.get("model", ""))
+                        pc = None if is_total_mode(pm) else get_model_price(pm.get("model", ""))
                         if pc:
                             cur = pc.get('currency', 'CNY')
                             grand_costs[cur] = grand_costs.get(cur, 0.0) + calc_cost(inp, out, cache, pc)

@@ -116,6 +116,8 @@ def calc_total_cost(per_model_list: list, get_price) -> dict[str, float]:
     """计算 per_model 列表中所有有价格模型的费用总和。返回 {currency: cost}"""
     totals: dict[str, float] = {}
     for pm in (per_model_list or []):
+        if pm.get("token_mode") == "total":
+            continue
         pc = get_price(pm.get("model", ""))
         if pc:
             inp = pm.get("input", 0) or 0

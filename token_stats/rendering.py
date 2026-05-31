@@ -128,7 +128,8 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
 
 
 def build_aligned_raw(agent_display: str, per_model_list: list, helpers: dict,
-                      has_context: bool = False, extra_footer: str = None) -> str:
+                      has_context: bool = False, extra_footer: str = None,
+                      token_mode: str = "split") -> str:
     """从 per_model 数据构建列对齐的原始输出（含 Agent 合计行）。"""
     per_model_list = [pm for pm in (per_model_list or []) if not skip_model(pm)]
     if not per_model_list:
@@ -143,6 +144,7 @@ def build_aligned_raw(agent_display: str, per_model_list: list, helpers: dict,
         out = pm.get("output", 0) or 0
         cache = pm.get("cache", 0) or 0
         calls = pm.get("calls", 0) or 0
+        row_mode = pm.get("token_mode") or token_mode
         total = inp + out
         ti += inp
         to += out
@@ -159,15 +161,18 @@ def build_aligned_raw(agent_display: str, per_model_list: list, helpers: dict,
             else:
                 cols.append("")
                 cols.append(f"{fmt_num(total)}/-")
-        cols.append(f"入 {fmt_num(inp)}")
-        cols.append(f"出 {fmt_num(out)}")
-        cols.append(fmt_cache_val(cache, inp))
-        cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache)}")
+        if row_mode == "total":
+            cols.append(f"总计 {fmt_num(total)}")
+        else:
+            cols.append(f"入 {fmt_num(inp)}")
+            cols.append(f"出 {fmt_num(out)}")
+            cols.append(fmt_cache_val(cache, inp))
+            cols.append(f"总计/+缓存 {fmt_num(total)}/{fmt_num(total + cache)}")
         if calls > 0:
             cols.append(f"调用 {calls} 次")
         if has_price:
             price_cfg = helpers["get_model_price"](mn)
-            cols.append(helpers["fmt_cost"](inp, out, cache, price_cfg) if price_cfg else "-")
+            cols.append(helpers["fmt_cost"](inp, out, cache, price_cfg) if price_cfg and row_mode != "total" else "-")
         rows.append(cols)
 
     if len(per_model_list) > 1:
@@ -176,10 +181,13 @@ def build_aligned_raw(agent_display: str, per_model_list: list, helpers: dict,
         if has_context:
             subtotal_cols.append("")
             subtotal_cols.append("")
-        subtotal_cols.append(f"入 {fmt_num(ti)}")
-        subtotal_cols.append(f"出 {fmt_num(to)}")
-        subtotal_cols.append(fmt_cache_val(tc, ti))
-        subtotal_cols.append(f"总计/+缓存 {fmt_num(total_all)}/{fmt_num(total_all + tc)}")
+        if token_mode == "total":
+            subtotal_cols.append(f"总计 {fmt_num(total_all)}")
+        else:
+            subtotal_cols.append(f"入 {fmt_num(ti)}")
+            subtotal_cols.append(f"出 {fmt_num(to)}")
+            subtotal_cols.append(fmt_cache_val(tc, ti))
+            subtotal_cols.append(f"总计/+缓存 {fmt_num(total_all)}/{fmt_num(total_all + tc)}")
         subtotal_cols.append(f"调用 {tca} 次")
         if has_price:
             total_cost_str = helpers["fmt_total_cost"](helpers["calc_total_cost"](per_model_list))

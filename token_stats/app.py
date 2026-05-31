@@ -91,7 +91,7 @@ from .formatting import (
     strip_ansi as _strip_ansi,
 )
 
-VERSION = "2.7.6"
+VERSION = "2.7.7"
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 
@@ -139,6 +139,8 @@ def _fmt_total_cost(totals: dict[str, float]) -> str:
 def _has_any_price(per_model_data: list) -> bool:
     """检查 per_model 列表中是否至少有一个模型配置了价格"""
     for pm in (per_model_data or []):
+        if pm.get("token_mode") == "total":
+            continue
         mn = pm.get("model", "")
         if _get_model_price(mn):
             return True
@@ -223,9 +225,11 @@ def format_model_line(model_name: str, inp: int, out: int, cache: int, calls: in
 
 def _build_aligned_raw(agent_display: str, per_model_list: list,
                         has_context: bool = False,
-                        extra_footer: str = None) -> str:
+                        extra_footer: str = None,
+                        token_mode: str = "split") -> str:
     return build_aligned_raw(agent_display, per_model_list, _render_helpers(),
-                             has_context=has_context, extra_footer=extra_footer)
+                             has_context=has_context, extra_footer=extra_footer,
+                             token_mode=token_mode)
 
 
 # ═══════════════════════════════════════════════════
@@ -617,6 +621,8 @@ class ClaudeCodeAgent(BaseAgent):
                                     'input': inp,
                                     'output': out,
                                     'cache': cache,
+                                    'project': proj,
+                                    'file': fpath,
                                 })
                     except Exception:
                         continue
@@ -626,6 +632,8 @@ class ClaudeCodeAgent(BaseAgent):
 
         # 按时间范围过滤
         per_model_data = {}
+        filtered_projects = set()
+        filtered_files = set()
         for msg in messages:
             if msg['ts'] is not None:
                 if from_ts is not None and msg['ts'] < from_ts:
@@ -641,6 +649,10 @@ class ClaudeCodeAgent(BaseAgent):
             per_model_data[model]["output"] += msg['output']
             per_model_data[model]["cache"] += msg['cache']
             per_model_data[model]["calls"] += 1
+            if msg.get("project"):
+                filtered_projects.add(msg["project"])
+            if msg.get("file"):
+                filtered_files.add(msg["file"])
 
         if not per_model_data:
             return AgentData(
@@ -670,7 +682,13 @@ class ClaudeCodeAgent(BaseAgent):
                 "cache": md["cache"],
             })
 
-        extra_footer = f"  子代理: {self._cached_sub_count} 次 | 会话: {self._cached_session_count} 个 | 项目: {self._cached_project_count} 个"
+        if from_ts is not None or to_ts is not None:
+            session_count = len(filtered_files)
+            project_count = len(filtered_projects)
+        else:
+            session_count = self._cached_session_count
+            project_count = self._cached_project_count
+        extra_footer = f"  子代理: {self._cached_sub_count} 次 | 会话: {session_count} 个 | 项目: {project_count} 个"
         raw = _build_aligned_raw("Claude Code", per_model_list,
                                  has_context=False,
                                  extra_footer=extra_footer)
@@ -683,8 +701,8 @@ class ClaudeCodeAgent(BaseAgent):
             "api_calls": total_calls,
             "sub_calls": self._cached_sub_count,
             "total_tokens": total_input + total_output,
-            "session_count": self._cached_session_count,
-            "projects": self._cached_project_count,
+            "session_count": session_count,
+            "projects": project_count,
         }
 
         return AgentData(name="claude-code", display_name="Claude Code",
@@ -695,105 +713,121 @@ class ClaudeCodeAgent(BaseAgent):
 #  CodeX
 # ═══════════════════════════════════════════════════
 
-# JSONL parse cache: {rollout_path: (mtime, {"input": N, "output": N, "cache": N, "calls": N})}
+# JSONL parse cache: {rollout_path: (mtime, [delta_event, ...])}
 _codex_jsonl_cache = {}
 
 
-def _parse_codex_session_jsonl(rollout_path, from_ts=None, to_ts=None):
-    """解析 CodeX session JSONL 文件，提取 token 消耗（含 I/O 拆分和调用次数）。
+def _codex_usage_parts(usage: dict) -> tuple[int, int, int]:
+    """Return cumulative (input_total, cache_total, output_total) from a CodeX usage dict."""
+    inp = int(usage.get("input_tokens", 0) or 0)
+    cache = int(usage.get("cached_input_tokens", 0) or 0)
+    out = int(usage.get("output_tokens", 0) or 0) + int(usage.get("reasoning_output_tokens", 0) or 0)
+    return inp, cache, out
 
-    返回 {"input": N, "output": N, "cache": N, "calls": N} 或 None（解析失败）。
-    calls = session 中的 token_count 事件数（即 API 调用次数）。
-    - 无时间过滤：使用最后一个 token_count 事件的 total_token_usage
-    - 有时间过滤：累加范围内各事件的 last_token_usage
+
+def _codex_delta_from_totals(current: tuple[int, int, int], previous: tuple[int, int, int] | None):
+    """Convert cumulative CodeX totals into a single event delta.
+
+    CodeX may emit token_count events with unchanged totals or info=null. Those are
+    progress/rate-limit updates, not API usage increments, so callers skip zero deltas.
+    """
+    if previous is None:
+        delta = current
+    else:
+        delta = tuple(cur - prev for cur, prev in zip(current, previous))
+        if any(v < 0 for v in delta):
+            # Defensive reset handling: if a future schema restarts totals mid-file,
+            # treat the current total as a new segment rather than emitting negatives.
+            delta = current
+    if not any(v > 0 for v in delta):
+        return None
+    inp_total, cache_tok, out_tok = delta
+    return {
+        "input": max(0, inp_total - cache_tok),
+        "output": max(0, out_tok),
+        "cache": max(0, cache_tok),
+        "calls": 1,
+    }
+
+
+def _load_codex_session_deltas(rollout_path):
+    """Parse a CodeX rollout JSONL into timestamped token deltas.
+
+    Returns None only when the file cannot be parsed as a CodeX token stream. An
+    empty list means the file was readable but had no billable usage deltas.
     """
     if not rollout_path or not os.path.exists(rollout_path):
         return None
 
     mtime = os.path.getmtime(rollout_path)
-    cache_key = rollout_path
+    cached = _codex_jsonl_cache.get(rollout_path)
+    if cached and cached[0] == mtime:
+        return list(cached[1])
 
-    # 无过滤时查缓存
-    if from_ts is None and to_ts is None:
-        if cache_key in _codex_jsonl_cache:
-            cached_mtime, cached_data = _codex_jsonl_cache[cache_key]
-            if cached_mtime == mtime:
-                return dict(cached_data)
-
+    deltas = []
+    saw_token_event = False
+    prev_total = None
     try:
         with open(rollout_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    obj.get("type") != "event_msg"
+                    or obj.get("payload", {}).get("type") != "token_count"
+                ):
+                    continue
+                saw_token_event = True
+                ts_str = obj.get("timestamp", "")
+                try:
+                    evt_ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
+                except Exception:
+                    continue
+                info = obj.get("payload", {}).get("info") or {}
+                total = info.get("total_token_usage")
+                if not isinstance(total, dict) or not total:
+                    continue
+                current = _codex_usage_parts(total)
+                delta = _codex_delta_from_totals(current, prev_total)
+                prev_total = current
+                if delta is None:
+                    continue
+                delta["ts"] = evt_ts
+                deltas.append(delta)
     except Exception:
         return None
 
-    token_events = []
-    for line in lines:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
+    if not saw_token_event:
+        return None
+    _codex_jsonl_cache[rollout_path] = (mtime, list(deltas))
+    return deltas
+
+
+def _parse_codex_session_jsonl(rollout_path, from_ts=None, to_ts=None):
+    """解析 CodeX session JSONL 文件，提取 token 消耗（含 I/O 拆分和调用次数）。
+
+    返回 {"input": N, "output": N, "cache": N, "calls": N, "_parsed": True}
+    或 None（文件缺失/不可读/不是 CodeX token stream）。
+    calls = 有真实 token 增量的 token_count 事件数；info=null 或累计值不变的
+    progress/rate-limit 事件不计入调用。
+    """
+    deltas = _load_codex_session_deltas(rollout_path)
+    if deltas is None:
+        return None
+
+    result = {"input": 0, "output": 0, "cache": 0, "calls": 0, "_parsed": True}
+    for evt in deltas:
+        evt_ts = evt.get("ts")
+        if from_ts is not None and evt_ts is not None and evt_ts < from_ts:
             continue
-        if (
-            obj.get("type") == "event_msg"
-            and obj.get("payload", {}).get("type") == "token_count"
-        ):
-            token_events.append(obj)
-
-    if not token_events:
-        return None
-
-    if from_ts is not None or to_ts is not None:
-        result = {"input": 0, "output": 0, "cache": 0, "calls": 0}
-        for evt in token_events:
-            ts_str = evt.get("timestamp", "")
-            if not ts_str:
-                continue
-            try:
-                evt_ts = datetime.fromisoformat(
-                    ts_str.replace("Z", "+00:00")
-                ).timestamp()
-            except Exception:
-                continue
-            if from_ts is not None and evt_ts < from_ts:
-                continue
-            if to_ts is not None and evt_ts > to_ts:
-                continue
-            info = evt.get("payload", {}).get("info") or {}
-            usage = info.get("last_token_usage") or info.get("total_token_usage") or {}
-            if not isinstance(usage, dict):
-                continue
-            inp_total = usage.get("input_tokens", 0)
-            cache_tok = usage.get("cached_input_tokens", 0)
-            out_tok = usage.get("output_tokens", 0) + usage.get(
-                "reasoning_output_tokens", 0
-            )
-            result["input"] += inp_total - cache_tok
-            result["cache"] += cache_tok
-            result["output"] += out_tok
-            result["calls"] += 1
-        return result if any(v > 0 for v in result.values()) else None
-
-    # 无过滤：用最后一个 token_count 的 total_token_usage
-    usage = {}
-    for evt in reversed(token_events):
-        info = evt.get("payload", {}).get("info") or {}
-        candidate = info.get("total_token_usage") or info.get("last_token_usage") or {}
-        if isinstance(candidate, dict) and candidate:
-            usage = candidate
-            break
-    if not usage:
-        return None
-    inp_total = usage.get("input_tokens", 0)
-    cache_tok = usage.get("cached_input_tokens", 0)
-    out_tok = usage.get("output_tokens", 0) + usage.get(
-        "reasoning_output_tokens", 0
-    )
-    result = {
-        "input": inp_total - cache_tok,
-        "output": out_tok,
-        "cache": cache_tok,
-        "calls": len(token_events),
-    }
-    _codex_jsonl_cache[cache_key] = (mtime, dict(result))
+        if to_ts is not None and evt_ts is not None and evt_ts > to_ts:
+            continue
+        result["input"] += evt.get("input", 0)
+        result["output"] += evt.get("output", 0)
+        result["cache"] += evt.get("cache", 0)
+        result["calls"] += evt.get("calls", 0)
     return result
 
 
@@ -850,14 +884,14 @@ class CodeXAgent(BaseAgent):
             model = r.get("model") or r.get("model_provider") or "codex-default"
             ts = int(r.get("tokens") or 0)
             cnt = int(r.get("cnt") or 0)
-            per_model_list.append({"model": model, "input": ts, "output": 0, "calls": cnt, "cache": 0})
+            per_model_list.append({"model": model, "input": ts, "output": 0, "calls": cnt, "cache": 0, "token_mode": "total"})
             total_tok += ts
             total_cnt += cnt
         stats = {
             "model": ", ".join(sorted({pm["model"] for pm in per_model_list})),
             "total_tokens": total_tok, "session_count": total_cnt,
         }
-        raw = _build_aligned_raw("CodeX (WSL)", per_model_list)
+        raw = _build_aligned_raw("CodeX (WSL)", per_model_list, token_mode="total")
         return AgentData(name="codex", display_name="CodeX", stats=stats, raw=raw, per_model=per_model_list, token_mode="total")
 
     def collect(self, *, from_ts: float = None, to_ts: float = None) -> AgentData:
@@ -891,9 +925,13 @@ class CodeXAgent(BaseAgent):
                 # 尝试从 session JSONL 读取 I/O 拆分
                 jd = _parse_codex_session_jsonl(rollout, from_ts, to_ts)
 
-                if jd:
+                if jd is not None:
+                    # JSONL 可读时即采用 JSONL 事件时间精筛；即便该时间段无
+                    # token delta，也不能回退到整条 threads.tokens_used。
+                    if not (jd["input"] or jd["output"] or jd["cache"] or jd["calls"]):
+                        continue
                     if model not in per_model:
-                        per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                        per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0, "mode": "split"}
                     per_model[model]["input"] += jd["input"]
                     per_model[model]["output"] += jd["output"]
                     per_model[model]["cache"] += jd["cache"]
@@ -910,7 +948,7 @@ class CodeXAgent(BaseAgent):
                     if ts <= 0:
                         continue
                     if model not in per_model:
-                        per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0}
+                        per_model[model] = {"input": 0, "output": 0, "calls": 0, "cache": 0, "mode": "total"}
                     per_model[model]["input"] += ts
                     per_model[model]["calls"] += 1
                     total_sessions += 1
@@ -929,18 +967,20 @@ class CodeXAgent(BaseAgent):
                     "output": data["output"],
                     "calls": data["calls"],
                     "cache": data["cache"],
+                    "token_mode": data.get("mode", "split"),
                 })
 
-            has_jsonl_data = any(pm["output"] > 0 for pm in per_model_list)
-            raw = _build_aligned_raw("CodeX", per_model_list)
+            has_total_only_data = any(data.get("mode") == "total" for data in per_model.values())
+            raw = _build_aligned_raw("CodeX", per_model_list,
+                                     token_mode="total" if has_total_only_data else "split")
 
             stats = {
                 "model": ", ".join(sorted(per_model.keys())),
                 "total_tokens": sum(pm["input"] + pm["output"] for pm in per_model_list),
                 "session_count": total_sessions,
             }
-            # 有 JSONL 数据时用 split 模式（I/O 拆分），否则标记为 total（回退）
-            token_mode = "split" if has_jsonl_data else "total"
+            # 只要混入 tokens_used fallback，就不能声称是完整 I/O 拆分。
+            token_mode = "total" if has_total_only_data else "split"
             return AgentData(name="codex", display_name="CodeX",
                              stats=stats, raw=raw, per_model=per_model_list, token_mode=token_mode)
 
@@ -1842,7 +1882,7 @@ def main():
                             gto += out
                             gtc += cache
                             gtca += pm.get("calls", 0) or 0
-                            pc = _get_model_price(pm.get("model", ""))
+                            pc = None if pm.get("token_mode") == "total" else _get_model_price(pm.get("model", ""))
                             if pc:
                                 cur = pc.get('currency', 'CNY')
                                 gt_costs[cur] = gt_costs.get(cur, 0.0) + _calc_cost(inp, out, cache, pc)

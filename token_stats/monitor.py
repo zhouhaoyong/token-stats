@@ -109,7 +109,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
             cols.append(f"调用 {mv['calls']}")
             if bl_has_price:
                 pc = get_model_price(mn)
-                cols.append(fmt_cost(mv['input'], mv['output'], cache_val, pc) if pc else "-")
+                cols.append(fmt_cost(mv['input'], mv['output'], cache_val, pc) if pc and not is_total_mode else "-")
             init_rows.append(cols)
             has_data = True
         aligned = align_rows(init_rows)
@@ -206,7 +206,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                 d_out = mv["output"] - bl["output"]
                 d_cache = mv.get("cache", 0) - bl.get("cache", 0)
                 pc = get_model_price(mn)
-                if pc and (d_in or d_out or d_cache):
+                if pc and not is_total_mode and (d_in or d_out or d_cache):
                     delta_cost += to_cny(calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
             if delta_cost > 0:
                 summary_parts.append(f"≈¥{delta_cost:.4f}")
@@ -261,7 +261,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                 cols.append(f"调用 +{d_calls}")
                 if delta_has_price:
                     pc = get_model_price(mn)
-                    if pc and (d_in or d_out or d_cache):
+                    if pc and not is_total_mode and (d_in or d_out or d_cache):
                         dc = to_cny(calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                         cols.append(f"≈¥{dc:.4f}")
                     else:
@@ -300,7 +300,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                                 f"调用 {ca}"]
                         if today_has_price:
                             pc = get_model_price(mn)
-                            cols.append(fmt_cost(i, o, c, pc) if pc else "-")
+                            cols.append(fmt_cost(i, o, c, pc) if pc and not is_total_mode else "-")
                         today_rows.append(cols)
                     if today_rows:
                         if len(today_rows) > 1:
@@ -309,7 +309,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                             if today_has_price:
                                 # 构造临时 per_model 用于费用计算
                                 tmp_models = [{"model": mn, "input": mv["input"] - today_start_baseline.get(mn, {"input":0}).get("input",0),
-                                               "output": 0, "cache": 0, "calls": 0} for mn, mv in now_models.items()]
+                                               "output": 0, "cache": 0, "calls": 0, "token_mode": "total"} for mn, mv in now_models.items()]
                                 tcs_str = fmt_total_cost(calc_total_cost(tmp_models))
                                 if tcs_str:
                                     sum_row.append(f"{tcs_str} (仅供参考)")
@@ -343,7 +343,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                                     f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
                         if today_has_price:
                             pc = get_model_price(m)
-                            cols.append(fmt_cost(i, o, c, pc) if pc else "-")
+                            cols.append(fmt_cost(i, o, c, pc) if pc and not is_today_total else "-")
                         today_rows.append(cols)
                     if today_rows:
                         if len(today_models) > 1:
@@ -410,7 +410,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
             cols.append(f"调用 {mv['calls']}")
             if bl_has_price:
                 pc = get_model_price(mn)
-                cols.append(fmt_cost(mv['input'], mv['output'], cache_v, pc) if pc else "-")
+                cols.append(fmt_cost(mv['input'], mv['output'], cache_v, pc) if pc and not is_total_mode else "-")
             final_rows.append(cols)
         aligned = align_rows(final_rows)
         for row in aligned:
@@ -438,14 +438,14 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                     cols = [mn, f"总计 {fmt_num(t)}", f"调用 {ca}"]
                     if today_has_price:
                         pc = get_model_price(mn)
-                        cols.append(fmt_cost(i, o, c, pc) if pc else "-")
+                        cols.append(fmt_cost(i, o, c, pc) if pc and not is_total_mode else "-")
                     today_rows.append(cols)
                 if today_rows:
                     if len(today_rows) > 1:
                         sum_row = ["今日合计", f"总计 {fmt_num(ti + to)}", f"调用 {tca}"]
                         if today_has_price:
                             tmp_models = [{"model": mn, "input": mv["input"] - today_start_baseline.get(mn, {"input":0}).get("input",0),
-                                           "output": 0, "cache": 0, "calls": 0} for mn, mv in bl_models.items()]
+                                           "output": 0, "cache": 0, "calls": 0, "token_mode": "total"} for mn, mv in bl_models.items()]
                             tcs_str = fmt_total_cost(calc_total_cost(tmp_models))
                             if tcs_str:
                                 sum_row.append(f"{tcs_str} (仅供参考)")
@@ -478,7 +478,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                                 f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
                     if today_has_price:
                         pc = get_model_price(m)
-                        cols.append(fmt_cost(i, o, c, pc) if pc else "-")
+                        cols.append(fmt_cost(i, o, c, pc) if pc and not is_today_total else "-")
                     today_rows.append(cols)
                 if today_rows:
                     if len(today_models) > 1:
@@ -527,7 +527,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                                 f"总计/+缓存 {fmt_num(t)}/{fmt_num(t + c)}", f"调用 {ca}"]
                     if yest_has_price:
                         pc = get_model_price(m)
-                        cols.append(fmt_cost(i, o, c, pc) if pc else "-")
+                        cols.append(fmt_cost(i, o, c, pc) if pc and not is_yest_total else "-")
                     yesterday_rows.append(cols)
                 if yesterday_rows:
                     yesterday_label = datetime.fromtimestamp(yesterday_start).strftime("%Y-%m-%d")
@@ -570,7 +570,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                 if d_cache:
                     any_d_cache = True
                 pc = get_model_price(mn)
-                if pc:
+                if pc and not is_total_mode:
                     dc = to_cny(calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                     total_d_cost += dc
                 delta_data.append((mn, d_tok, d_in, d_out, d_cache, d_calls, pc))
@@ -587,7 +587,7 @@ def watch_agent(agent, interval: int = 5, helpers: dict = None) -> None:
                 if any_d_cache and not is_total_mode:
                     cols.append(f"+{fmt_num(d_cache)}存")
                 cols.append(f"+{d_calls}调用")
-                if pc and (d_in or d_out or d_cache):
+                if pc and not is_total_mode and (d_in or d_out or d_cache):
                     dc = to_cny(calc_cost(d_in, d_out, d_cache, pc), pc.get('currency', 'CNY'))
                     cols.append(f"≈¥{dc:.4f}")
                 inc_rows.append(cols)

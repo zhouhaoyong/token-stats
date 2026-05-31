@@ -8,12 +8,14 @@ Install, update, and uninstall are covered only with temporary HOME/PATH fixture
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
@@ -85,6 +87,100 @@ class Runner:
         self.run("version", PY + [SCRIPT, "--version"], expect=["token-stats v"])
         self.run("help", PY + [SCRIPT, "--help"], expect=["命令大全", "--today", "--compare"])
         self.run("list_backends", PY + [SCRIPT, "--list-backends"], expect=["本机已安装"])
+        self.codex_unit_regression()
+
+    def codex_unit_regression(self):
+        self.sep("1b. CodeX 统计口径离线回归")
+        with tempfile.TemporaryDirectory(prefix="token-stats-codex-fixture-") as tmp:
+            base = Path(tmp)
+            codex_dir = base / ".codex"
+            rollouts = codex_dir / "sessions" / "2026" / "05" / "31"
+            rollouts.mkdir(parents=True)
+            db = codex_dir / "state_5.sqlite"
+            sqlite = sqlite3.connect(db)
+            sqlite.execute(
+                "CREATE TABLE threads ("
+                "id TEXT PRIMARY KEY, model TEXT, model_provider TEXT, tokens_used INTEGER, "
+                "rollout_path TEXT, updated_at INTEGER)"
+            )
+            rollout = rollouts / "rollout-main.jsonl"
+
+            def evt(ts: str, total: dict | None):
+                payload = {"type": "token_count", "info": None}
+                if total is not None:
+                    payload["info"] = {"total_token_usage": total}
+                return {"timestamp": ts, "type": "event_msg", "payload": payload}
+
+            rows = [
+                evt("2026-05-30T09:50:00Z", None),
+                evt("2026-05-30T10:00:00Z", {
+                    "input_tokens": 100, "cached_input_tokens": 20,
+                    "output_tokens": 10, "reasoning_output_tokens": 0,
+                }),
+                # Duplicate cumulative total: should not count as another call.
+                evt("2026-05-30T10:01:00Z", {
+                    "input_tokens": 100, "cached_input_tokens": 20,
+                    "output_tokens": 10, "reasoning_output_tokens": 0,
+                }),
+                evt("2026-05-30T16:05:00Z", {
+                    "input_tokens": 180, "cached_input_tokens": 50,
+                    "output_tokens": 25, "reasoning_output_tokens": 5,
+                }),
+                evt("2026-05-30T16:06:00Z", None),
+                evt("2026-05-30T16:07:00Z", {
+                    "input_tokens": 250, "cached_input_tokens": 80,
+                    "output_tokens": 40, "reasoning_output_tokens": 5,
+                }),
+            ]
+            with rollout.open("w", encoding="utf-8") as f:
+                for item in rows:
+                    f.write(json.dumps(item) + "\n")
+            sqlite.execute(
+                "INSERT INTO threads VALUES (?,?,?,?,?,?)",
+                ("main", "gpt-test", "openai", 999999, str(rollout), int(datetime(2026, 5, 31, 0, 10).timestamp())),
+            )
+            fallback_rollout = rollouts / "not-a-token-stream.jsonl"
+            fallback_rollout.write_text('{"type":"session_meta"}\n', encoding="utf-8")
+            sqlite.execute(
+                "INSERT INTO threads VALUES (?,?,?,?,?,?)",
+                ("fallback", "fallback-model", "openai", 321, str(fallback_rollout), int(datetime(2026, 5, 29, 12, 0).timestamp())),
+            )
+            sqlite.commit()
+            sqlite.close()
+
+            probe = base / "codex_probe.py"
+            probe.write_text(
+                "from token_stats.app import CodeXAgent, _codex_jsonl_cache\n"
+                "from token_stats.dates import parse_date\n"
+                "_codex_jsonl_cache.clear()\n"
+                "a = CodeXAgent()\n"
+                "def snap(label, lo=None, hi=None):\n"
+                "    d = a.collect(from_ts=lo, to_ts=hi)\n"
+                "    rows = sorted((pm['model'], pm['input'], pm['output'], pm['cache'], pm['calls']) for pm in (d.per_model or []))\n"
+                "    print(label, d.token_mode, rows)\n"
+                "snap('all')\n"
+                "lo, hi = parse_date('2026-05-31'); snap('day', lo, hi)\n"
+                "lo, hi = parse_date('2026-05-30'); snap('prev', lo, hi)\n"
+                "lo, hi = parse_date('2026-05-28'); snap('empty', lo, hi)\n",
+                encoding="utf-8",
+            )
+            env = {
+                "HOME": str(base),
+                "PYTHONPATH": str(ROOT),
+            }
+            result = self.run(
+                "codex_fixture",
+                PY + [probe],
+                env=env,
+                expect=[
+                    "all total [('fallback-model', 321, 0, 0, 1), ('gpt-test', 170, 45, 80, 3)]",
+                    "day split [('gpt-test', 90, 35, 60, 2)]",
+                    "prev split [('gpt-test', 80, 10, 20, 1)]",
+                    "empty split []",
+                ],
+            )
+            if "999999" in ((result.stdout or "") + (result.stderr or "")):
+                self.failures.append("codex_fixture: ranged JSONL data should not fall back to full tokens_used")
 
     def _detect_agents(self) -> list[str]:
         backends = self.run("detect_backends", PY + [SCRIPT, "--list-backends"]).stdout
